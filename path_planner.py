@@ -52,13 +52,13 @@ def plot_spline(
     y = pos[:, 1]
 
     pos = spline(t)
-    ax.plot(pos[:, 0], pos[:, 1], "r", label="spline")
+    ax.plot(pos[:, 0], pos[:, 1], "r", label="Path")
 
     minX = np.min(pos[:, 0]) - 1.0
     maxX = np.max(pos[:, 0]) + 1.0
     minY = np.min(pos[:, 1]) - 1.0
     maxY = np.max(pos[:, 1]) + 1.0
-    numPoints = 100
+    numPoints = 300
     x = np.linspace(minX, maxX, numPoints)
     y = np.linspace(minY, maxY, numPoints)
     [X, Y] = np.meshgrid(x, y)
@@ -66,21 +66,25 @@ def plot_spline(
     Z = batch_hazard_probs(
         np.array([X.flatten(), Y.flatten()]).T, posObjFunc, knownHazards
     )
-    print("Z", Z.shape)
-    c = ax.pcolormesh(X, Y, Z.reshape(X.shape))
-    fig.colorbar(c, ax=ax, label="Probability of discovering hazard")
+    c = ax.pcolormesh(X, Y, Z.reshape(X.shape), vmin=0, vmax=1)
+    cbar = fig.colorbar(c, ax=ax, shrink=0.7)
+    cbar.set_label("Hazard Probability", fontsize=26)
+    cbar.ax.tick_params(labelsize=22)
+
     ax.scatter(
         knownHazards[:, 0], knownHazards[:, 1], c="r", marker="x", label="Hazard"
     )
+    ax.scatter(pos[0, 0], pos[0, 1], c="g", marker="o", label="Start Node")
+    ax.scatter(pos[-1, 0], pos[-1, 1], c="b", marker="o", label="End Node")
 
     ax.set_aspect(1)
     # c = plt.Circle(pursuerPosition, pursuerRange + pursuerCaptureRange, fill=False)
     # ax.add_artist(c)
     ax.set_xlabel("X")
     ax.set_ylabel("Y")
-    ax.legend()
-    # print max mc and linear pez in title
-    # limit to 3 decimal places
+    ax.legend(fontsize=20)
+    ax.set_title("Optimized Path", fontsize=26)
+    fig.set_size_inches(20, 10)
 
 
 def safe_norm(x, y, eps=1e-6):
@@ -172,7 +176,7 @@ def plot_test(centers, radiuses):
     plt.show()
 
 
-def evaluate_spline(controlPoints, knotPoints):
+def evaluate_spline(controlPoints, knotPoints, numSamplesPerInterval=10):
     knotPoints = knotPoints.reshape((-1,))
     return matrix_bspline_evaluation_for_dataset(
         controlPoints.T, knotPoints, numSamplesPerInterval
@@ -206,7 +210,10 @@ def objective_funtion(controlPoints, tf, splineOrder, knownHazards, gridPoints):
     numControlPoints = int(len(controlPoints) / 2)
     controlPoints = controlPoints.reshape((numControlPoints, 2))
     knotPoints = create_unclamped_knot_points(0, tf, numControlPoints, splineOrder)
-    pos = evaluate_spline(controlPoints, knotPoints)
+    # dt = knotPoints[3] - knotPoints[0]
+    # splineSampledt = 0.5
+    # numSamplesPerIntervalObj = (dt / splineSampledt).astype(int)
+    pos = evaluate_spline(controlPoints, knotPoints, numSamplesPerInterval)
     return jnp.mean(batch_hazard_probs(gridPoints, pos, knownHazards))
 
 
@@ -702,7 +709,7 @@ def optimize_spline_path(
     opt = OPT("ipopt")
     opt.options["print_level"] = 5
     opt.options["max_iter"] = 1000
-    opt.options["tol"] = 1e-12
+    opt.options["tol"] = 1e-6
     username = getpass.getuser()
     opt.options["hsllib"] = (
         "/home/" + username + "/packages/ThirdParty-HSL/.libs/libcoinhsl.so"
@@ -739,10 +746,20 @@ def main():
     splineOrder = 3
     turn_rate_constraints = (-50.0, 50.0)
     curvature_constraints = (-10.0, 10.0)
+    boundsX = (-1, 10)
+    boundsY = (-1, 6)
 
     pathLengthConstraint = 1.5 * np.linalg.norm(endingLocation - startingLocation)
 
-    knownHazards = np.array([[0.0, 0.0], [1.0, 2.0], [6.0, 4.0], [10.0, 5.0]])
+    # knownHazards = np.array([startingLocation, endingLocation])
+    # knownHazards = np.array(
+    #     [startingLocation, [1.0, 3.0], [4.0, 4.0], [7.0, 5.0], endingLocation]
+    # )
+    numKnownHazards = 5
+    knownHazardsX = np.random.uniform(boundsX[0], boundsX[1], (numKnownHazards,))
+    knownHazardsY = np.random.uniform(boundsY[0], boundsY[1], (numKnownHazards,))
+    knownHazards = np.array([knownHazardsX, knownHazardsY]).T
+    knownHazards = np.vstack([startingLocation, knownHazards, endingLocation])
 
     spline = optimize_spline_path(
         startingLocation,

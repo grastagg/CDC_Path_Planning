@@ -1144,4 +1144,3 @@ def __get_clamped_5_order_matrix(initial_control_point_index, order, knot_points
         else:
             M = __get_5_order_matrix()
     return M
-
