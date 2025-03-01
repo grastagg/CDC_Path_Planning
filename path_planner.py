@@ -29,14 +29,13 @@ from bspline.matrix_evaluation import (
 
 # jax.config.update("jax_disable_jit", True)
 
-numSamplesPerInterval = 15
+numSamplesPerInterval = 10
 
 
 # def plot_spline(spline, pursuerPosition, pursuerRange, pursuerCaptureRange,pez_limit,useProbabalistic):
 def plot_spline(
     spline,
-    exploredPoints,
-    sensingRadius,
+    knownHazards,
     fig,
     ax,
 ):
@@ -53,45 +52,68 @@ def plot_spline(
     y = pos[:, 1]
 
     pos = spline(t)
-    ax.plot(pos[:, 0], pos[:, 1], "r--", label="spline")
+    ax.plot(pos[:, 0], pos[:, 1], "r", label="spline")
 
     minX = np.min(pos[:, 0]) - 1.0
     maxX = np.max(pos[:, 0]) + 1.0
     minY = np.min(pos[:, 1]) - 1.0
     maxY = np.max(pos[:, 1]) + 1.0
-    numPoints = 300
+    numPoints = 100
     x = np.linspace(minX, maxX, numPoints)
     y = np.linspace(minY, maxY, numPoints)
     [X, Y] = np.meshgrid(x, y)
     posObjFunc = evaluate_spline(spline.c, spline.t)
     Z = batch_hazard_probs(
-        np.array([X.flatten(), Y.flatten()]).T, posObjFunc, sensingRadius
+        np.array([X.flatten(), Y.flatten()]).T, posObjFunc, knownHazards
     )
     print("Z", Z.shape)
     c = ax.pcolormesh(X, Y, Z.reshape(X.shape))
     fig.colorbar(c, ax=ax, label="Probability of discovering hazard")
+    ax.scatter(
+        knownHazards[:, 0], knownHazards[:, 1], c="r", marker="x", label="Hazard"
+    )
 
     ax.set_aspect(1)
     # c = plt.Circle(pursuerPosition, pursuerRange + pursuerCaptureRange, fill=False)
     # ax.add_artist(c)
     ax.set_xlabel("X")
     ax.set_ylabel("Y")
+    ax.legend()
     # print max mc and linear pez in title
     # limit to 3 decimal places
 
 
+def safe_norm(x, y, eps=1e-6):
+    return jnp.sqrt(jnp.sum((x - y) ** 2) + eps)  # Avoids sqrt(0)
+
+
+safe_norm_vectorized = jax.vmap(safe_norm, in_axes=(None, 0))
+
+
 def prior_hazard_distirbution(x, hazardLocations):
     # If there is prior knowledge of where hazards are located include it as a probability distribution here
-    dists = np.linalg.norm(hazardLocations - x, axis=1)
-    return np.exp(-5 * dists)
+    baseProir = 0.5
+    maxProir = 0.9
+    decayRate = 2.0
+    # dists = jnp.linalg.norm(hazardLocations - x, axis=1)
+    dists = safe_norm_vectorized(x, hazardLocations)
+
+    singleHazardProbs = jnp.exp(-decayRate * dists)
+    combinedHazardProbs = 1 - jnp.prod(1 - singleHazardProbs)
+
+    # scale appropriately
+    prior = baseProir + (maxProir - baseProir) * combinedHazardProbs
+
+    return prior
 
 
 def hazard_at_x_given_searched_at_points(x, points, steepness):
     # Compute stable Euclidean distances
-    def safe_norm(x, y, eps=1e-6):
-        return jnp.sqrt(jnp.sum((x - y) ** 2) + eps)  # Avoids sqrt(0)
-
-    dists = jax.vmap(lambda s: safe_norm(x, s))(points)
+    # def safe_norm(x, y, eps=1e-6):
+    #     return jnp.sqrt(jnp.sum((x - y) ** 2) + eps)  # Avoids sqrt(0)
+    #
+    # dists = jax.vmap(lambda s: safe_norm(x, s))(points)
+    dists = safe_norm_vectorized(x, points)
     return jnp.exp(-steepness * dists)
 
 
@@ -180,16 +202,12 @@ def create_unclamped_knot_points(t0, tf, numControlPoints, splineOrder):
 
 
 @partial(jit, static_argnums=(2,))
-def objective_funtion(controlPoints, tf, splineOrder, sensingRadius, gridPoints):
+def objective_funtion(controlPoints, tf, splineOrder, knownHazards, gridPoints):
     numControlPoints = int(len(controlPoints) / 2)
     controlPoints = controlPoints.reshape((numControlPoints, 2))
     knotPoints = create_unclamped_knot_points(0, tf, numControlPoints, splineOrder)
-    # t0 = knotPoints[splineOrder]
-    # tf = knotPoints[-splineOrder - 1]
-    # dt = (tf - t0) / numSamplesPerInterval
     pos = evaluate_spline(controlPoints, knotPoints)
-    # vel = get_spline_velocity(controlPoints.flatten(), tf, splineOrder)
-    return jnp.sum(batch_hazard_probs(gridPoints, pos, sensingRadius))
+    return jnp.mean(batch_hazard_probs(gridPoints, pos, knownHazards))
 
 
 @partial(jit, static_argnums=(2,))
@@ -482,13 +500,12 @@ def optimize_spline_path(
     turnrateConstraints,
     curvatureConstraints,
     pathLengthConstraint,
-    exploredPoints,
-    sensingRadius,
+    knownHazards,
     boundsX=(-10, 10),
     boundsY=(-10, 10),
 ):
-    gridPointsX = jnp.linspace(boundsX[0], boundsX[1], 10)
-    gridPointsY = jnp.linspace(boundsY[0], boundsY[1], 10)
+    gridPointsX = jnp.linspace(boundsX[0], boundsX[1], 100)
+    gridPointsY = jnp.linspace(boundsY[0], boundsY[1], 100)
     [X, Y] = jnp.meshgrid(gridPointsX, gridPointsY)
     gridPoints = jnp.array([X.flatten(), Y.flatten()]).T
 
@@ -507,7 +524,7 @@ def optimize_spline_path(
             controlPoints, knotPoints, splineOrder
         )
         obj = objective_funtion(
-            controlPoints.flatten(), tf, splineOrder, sensingRadius, gridPoints
+            controlPoints.flatten(), tf, splineOrder, knownHazards, gridPoints
         )
 
         funcs["obj"] = obj
@@ -542,7 +559,7 @@ def optimize_spline_path(
         dCurvatureDtfVal = dCurvatureDtf(controlPoints, tf, splineOrder)
 
         dObjectiveFunctionDControlPointsVal = dObjectiveFunctionDControlPoints(
-            controlPoints, tf, splineOrder, sensingRadius, gridPoints
+            controlPoints, tf, splineOrder, knownHazards, gridPoints
         )
         failed = False
         if np.any(np.isnan(dObjectiveFunctionDControlPointsVal)):
@@ -561,7 +578,7 @@ def optimize_spline_path(
             )
             print("dists", np.min(dists))
         dObjectiveFunctionDtfVal = dObjectiveFunctionDtf(
-            controlPoints, tf, splineOrder, sensingRadius, gridPoints
+            controlPoints, tf, splineOrder, knownHazards, gridPoints
         )
 
         dPathLengthDControlPointsVal = dPathLengthDControlPoints(
@@ -636,7 +653,7 @@ def optimize_spline_path(
     tf = assure_velocity_constraint(x0, velocityConstraints)
 
     # test objective function gradient
-    objTest = objective_funtion(x0, tf, splineOrder, sensingRadius, gridPoints)
+    objTest = objective_funtion(x0, tf, splineOrder, knownHazards, gridPoints)
 
     optProb = Optimization("path optimization", objfunc)
 
@@ -645,8 +662,8 @@ def optimize_spline_path(
         nVars=2 * (numControlPoints),
         varType="c",
         value=x0,
-        lower=-12,
-        upper=12,
+        lower=-50,
+        upper=50,
     )
     optProb.addVarGroup(name="tf", nVars=1, varType="c", value=tf, lower=0, upper=None)
     #
@@ -718,17 +735,15 @@ def main():
     initialVelocity = initialVelocity / np.linalg.norm(initialVelocity) * agentSpeed
     velocityConstraints = np.array([0.5, 1.0])
 
-    numControlPoints = 8
+    numControlPoints = 14
     splineOrder = 3
     turn_rate_constraints = (-50.0, 50.0)
     curvature_constraints = (-10.0, 10.0)
 
-    exploredPoints = np.array([[-1, -1]])
-
-    print("strait path length", np.linalg.norm(endingLocation - startingLocation))
     pathLengthConstraint = 1.5 * np.linalg.norm(endingLocation - startingLocation)
 
-    sensingRadius = 0.5
+    knownHazards = np.array([[0.0, 0.0], [1.0, 2.0], [6.0, 4.0], [10.0, 5.0]])
+
     spline = optimize_spline_path(
         startingLocation,
         endingLocation,
@@ -740,12 +755,13 @@ def main():
         turn_rate_constraints,
         curvature_constraints,
         pathLengthConstraint,
-        exploredPoints,
-        sensingRadius,
+        knownHazards,
+        boundsX=(-1, 10),
+        boundsY=(-1, 6),
     )
 
     fig, ax = plt.subplots()
-    plot_spline(spline, exploredPoints, sensingRadius, fig, ax)
+    plot_spline(spline, knownHazards, fig, ax)
     plt.show()
 
 
