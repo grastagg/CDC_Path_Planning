@@ -1,3 +1,4 @@
+from jax._src.interpreters.batching import batch
 import numpy as np
 from pyoptsparse import Optimization, OPT, IPOPT
 from scipy.interpolate import BSpline
@@ -26,6 +27,7 @@ from bspline.matrix_evaluation import (
     matrix_bspline_derivative_evaluation_for_dataset,
 )
 
+# jax.config.update("jax_disable_jit", True)
 
 numSamplesPerInterval = 15
 
@@ -49,9 +51,6 @@ def plot_spline(
     pos = spline(t)
     x = pos[:, 0]
     y = pos[:, 1]
-    splineDot = spline.derivative()(t)
-    xDot = splineDot[:, 0]
-    yDot = splineDot[:, 1]
 
     pos = spline(t)
     ax.plot(pos[:, 0], pos[:, 1], "r--", label="spline")
@@ -64,8 +63,9 @@ def plot_spline(
     x = np.linspace(minX, maxX, numPoints)
     y = np.linspace(minY, maxY, numPoints)
     [X, Y] = np.meshgrid(x, y)
-    Z = probability_of_discovering_undiscovered_hazard(
-        np.array([X.flatten(), Y.flatten()]).T, exploredPoints, sensingRadius
+    posObjFunc = evaluate_spline(spline.c, spline.t)
+    Z = batch_hazard_probs(
+        np.array([X.flatten(), Y.flatten()]).T, posObjFunc, sensingRadius
     )
     print("Z", Z.shape)
     c = ax.pcolormesh(X, Y, Z.reshape(X.shape))
@@ -80,58 +80,60 @@ def plot_spline(
     # limit to 3 decimal places
 
 
-@jax.jit
-def radial_sigmoid_single_circle_single_point(x, center, radius, alpha):
-    dist = jnp.linalg.norm(x - center)
-    # jax.debug.print("dist {x}", x=dist)
-    maxProb = 0.95
-    # clip the exponent to prevent overflow
-    exponent = alpha * (dist - radius)
-    # exponent = jnp.clip(alpha * (dist - radius), -20, 20)
-
-    return maxProb * (1.0 / (1.0 + jnp.exp(exponent)))
-
-
-radial_sigmoid_multiple_circles_single_point = jax.vmap(
-    radial_sigmoid_single_circle_single_point, in_axes=(None, 0, None, None)
-)
-radial_sigmoid_multiple_circles_multiple_points = jax.vmap(
-    radial_sigmoid_multiple_circles_single_point, in_axes=(0, None, None, None)
-)
-
-
-def prior_hazard_distirbution(x):
+def prior_hazard_distirbution(x, hazardLocations):
     # If there is prior knowledge of where hazards are located include it as a probability distribution here
-    return 0.5
+    dists = np.linalg.norm(hazardLocations - x, axis=1)
+    return np.exp(-5 * dists)
 
 
-def probability_of_discovering_undiscovered_hazard_single_point(
-    x, searchedPoints, radius
-):
-    probHazardNotFoundGivenHazardAtXMultiplePoints = (
-        1
-        - radial_sigmoid_multiple_circles_single_point(x, searchedPoints, radius, 20.0)
+def hazard_at_x_given_searched_at_points(x, points, steepness):
+    # Compute stable Euclidean distances
+    def safe_norm(x, y, eps=1e-6):
+        return jnp.sqrt(jnp.sum((x - y) ** 2) + eps)  # Avoids sqrt(0)
+
+    dists = jax.vmap(lambda s: safe_norm(x, s))(points)
+    return jnp.exp(-steepness * dists)
+
+
+@jax.jit
+def hazard_posterior_prob(x, searched_points, knownHazards):
+    """
+    Compute posterior probability of hazard existence at point x given search history.
+
+    Args:
+        x: Query point (2D array)
+        searched_points: Array of searched locations (N x 2)
+        radius: Detection radius of sensor
+
+    Returns:
+        Posterior probability (0-1) of hazard existing at x
+    """
+
+    steepness = 5.0
+    false_alarm = 0.0
+    prior = prior_hazard_distirbution(x, knownHazards)
+
+    p_hazard_at_x_givin_points = hazard_at_x_given_searched_at_points(
+        x, searched_points, steepness
     )
-    probHazardNotFoundGivenHazardAtX = jnp.prod(
-        probHazardNotFoundGivenHazardAtXMultiplePoints
+
+    # Compute log probabilities safely
+    log_p_no_detect_given_hazard = jnp.sum(jnp.log1p(-p_hazard_at_x_givin_points))
+    log_p_no_detect_given_no_hazard = searched_points.shape[0] * jnp.log1p(-false_alarm)
+
+    # Bayesian update in log space
+    log_numerator = jnp.log(prior) + log_p_no_detect_given_hazard
+    log_denominator = jnp.logaddexp(
+        log_numerator, jnp.log1p(-prior) + log_p_no_detect_given_no_hazard
     )
 
-    # priorProbHazard = prior_hazard_distirbution(x)
-    priorProbHazard = 0.5
-    probFalseAlarm = 0.0
+    result = jnp.exp(log_numerator - log_denominator)
 
-    probHazardNotFoundGivenNoHazardAtX = (1 - probFalseAlarm) ** len(searchedPoints)
-
-    return (probHazardNotFoundGivenHazardAtX * priorProbHazard) / (
-        probHazardNotFoundGivenHazardAtX * priorProbHazard
-        + probHazardNotFoundGivenNoHazardAtX * (1 - priorProbHazard)
-    )
-    # return probHazardNotFoundGivenHazardAtXMultiplePoints
+    return result
 
 
-probability_of_discovering_undiscovered_hazard = jax.vmap(
-    probability_of_discovering_undiscovered_hazard_single_point, in_axes=(0, None, None)
-)
+# Batch version for multiple points
+batch_hazard_probs = jit(jax.vmap(hazard_posterior_prob, in_axes=(0, None, None)))
 
 
 def plot_test(centers, radiuses):
@@ -141,10 +143,7 @@ def plot_test(centers, radiuses):
     # Z = radial_sigmoid_multiple_circles_multiple_points(
     #     np.array([X.flatten(), Y.flatten()]).T, centers, radiuses, 50
     # )
-    Z = probability_of_discovering_undiscovered_hazard(
-        np.array([X.flatten(), Y.flatten()]).T, centers, radiuses
-    )
-    print("Z", np.max(Z))
+    Z = batch_hazard_probs(np.array([X.flatten(), Y.flatten()]).T, centers, radiuses)
     fig, ax = plt.subplots()
     c = ax.pcolormesh(X, Y, Z.reshape(X.shape))
     fig.colorbar(c, ax=ax)
@@ -165,18 +164,6 @@ def evaluate_spline_derivative(controlPoints, knotPoints, splineOrder, derivativ
     )
 
 
-@jax.jit
-def integrate_prob_of_discovering_undicoevered_hazard_along_spline(
-    pos, dt, exploredPoints, sensingRadius
-):
-    prob = probability_of_discovering_undiscovered_hazard(
-        pos, exploredPoints, sensingRadius
-    )
-
-    return np.mean(prob) * dt
-    # return jnp.sum(prob) * dt
-
-
 @partial(jit, static_argnums=(2, 3))
 def create_unclamped_knot_points(t0, tf, numControlPoints, splineOrder):
     internalKnots = jnp.linspace(t0, tf, numControlPoints - 2, endpoint=True)
@@ -193,17 +180,16 @@ def create_unclamped_knot_points(t0, tf, numControlPoints, splineOrder):
 
 
 @partial(jit, static_argnums=(2,))
-def objective_funtion(controlPoints, tf, splineOrder, exploredPoints, sensingRadius):
+def objective_funtion(controlPoints, tf, splineOrder, sensingRadius, gridPoints):
     numControlPoints = int(len(controlPoints) / 2)
     controlPoints = controlPoints.reshape((numControlPoints, 2))
     knotPoints = create_unclamped_knot_points(0, tf, numControlPoints, splineOrder)
-    t0 = knotPoints[splineOrder]
-    tf = knotPoints[-splineOrder - 1]
-    dt = (tf - t0) / numSamplesPerInterval
+    # t0 = knotPoints[splineOrder]
+    # tf = knotPoints[-splineOrder - 1]
+    # dt = (tf - t0) / numSamplesPerInterval
     pos = evaluate_spline(controlPoints, knotPoints)
-    return -integrate_prob_of_discovering_undicoevered_hazard_along_spline(
-        pos, dt, exploredPoints, sensingRadius
-    )
+    # vel = get_spline_velocity(controlPoints.flatten(), tf, splineOrder)
+    return jnp.sum(batch_hazard_probs(gridPoints, pos, sensingRadius))
 
 
 @partial(jit, static_argnums=(2,))
@@ -335,12 +321,42 @@ def get_turn_rate_velocity_and_headings(controlPoints, knotPoints):
     return u, v, heading
 
 
-def compute_spline_constraints_and_objective(
+#
+# def vectorized_point_in_convex_polygon(points, polygon_vertices):
+#     """
+#     Args:
+#         points: Shape (N, 2), array of query points.
+#         polygon_vertices: Shape (M, 2), ordered vertices of the convex polygon (CCW or CW).
+#
+#     Returns:
+#         Boolean array of shape (N,), where True = inside/on-edge.
+#     """
+#     polygon_vertices = jnp.asarray(polygon_vertices)
+#     points = jnp.asarray(points)
+#
+#     # Generate edges (V_i to V_{i+1})
+#     edges = jnp.roll(polygon_vertices, shift=-1, axis=0) - polygon_vertices  # (M, 2)
+#
+#     # Compute vectors from polygon vertices to query points
+#     vectors = points[jnp.newaxis, :, :] - polygon_vertices[:, jnp.newaxis, :]  # (M, N, 2)
+#
+#     # Cross products: edge_x * vector_y - edge_y * vector_x
+#     cross_products = jnp.cross(edges[:, jnp.newaxis, :], vectors)  # (M, N)
+#
+#     # Check sign consistency across edges for all points
+#     all_non_negative = jnp.all(cross_products >= -1e-8, axis=0)  # Allow small negatives for FP tolerance
+#     all_non_positive = jnp.all(cross_products <= 1e-8, axis=0)
+#     inside = all_non_negative | all_non_positive  # (N,)
+#
+#     return inside
+#
+# dControlPointsDPointsInPolygon = jacfwd(vectorized_point_in_convex_polygon, argnums=0)
+
+
+def compute_spline_constraints(
     controlPoints,
     knotPoints,
     splineOrder,
-    exploredPoints,
-    sensingRadius,
 ):
     pos = evaluate_spline(controlPoints, knotPoints)
 
@@ -350,9 +366,6 @@ def compute_spline_constraints_and_objective(
     t0 = knotPoints[splineOrder]
     tf = knotPoints[-splineOrder - 1]
     dt = (tf - t0) / numSamplesPerInterval
-    prob = -integrate_prob_of_discovering_undicoevered_hazard_along_spline(
-        jnp.array(pos), dt, exploredPoints, sensingRadius
-    )
 
     curvature = turn_rate / velocity
 
@@ -360,7 +373,7 @@ def compute_spline_constraints_and_objective(
     dt = tSamples[1] - tSamples[0]
     pathLength = jnp.sum((velocity[:-1] + velocity[1:]) * 0.5 * dt)
 
-    return velocity, turn_rate, curvature, pos, prob, pathLength
+    return velocity, turn_rate, curvature, pos, pathLength
 
 
 def create_spline(knotPoints, controlPoints, order):
@@ -391,7 +404,6 @@ def assure_velocity_constraint(controlPoints, velocityBounds):
     while np.max(v) > velocityBounds[1]:
         tf += 0.01
         v = get_spline_velocity(controlPoints, tf, splineOrder)
-    print("max v", np.max(v))
     return tf
 
 
@@ -472,7 +484,14 @@ def optimize_spline_path(
     pathLengthConstraint,
     exploredPoints,
     sensingRadius,
+    boundsX=(-10, 10),
+    boundsY=(-10, 10),
 ):
+    gridPointsX = jnp.linspace(boundsX[0], boundsX[1], 10)
+    gridPointsY = jnp.linspace(boundsY[0], boundsY[1], 10)
+    [X, Y] = jnp.meshgrid(gridPointsX, gridPointsY)
+    gridPoints = jnp.array([X.flatten(), Y.flatten()]).T
+
     def objfunc(xDict):
         tf = xDict["tf"]
         knotPoints = create_unclamped_knot_points(0, tf, numControlPoints, 3)
@@ -484,20 +503,21 @@ def optimize_spline_path(
         funcs["end"] = get_end_constraint(controlPoints)
         controlPoints = controlPoints.reshape((numControlPoints, 2))
 
-        velocity, turn_rate, curvature, pos, prob, pathLength = (
-            compute_spline_constraints_and_objective(
-                controlPoints, knotPoints, splineOrder, exploredPoints, sensingRadius
-            )
+        velocity, turn_rate, curvature, pos, pathLength = compute_spline_constraints(
+            controlPoints, knotPoints, splineOrder
+        )
+        obj = objective_funtion(
+            controlPoints.flatten(), tf, splineOrder, sensingRadius, gridPoints
         )
 
-        funcs["obj"] = prob
+        funcs["obj"] = obj
         funcs["turn_rate"] = turn_rate
         funcs["velocity"] = velocity
         funcs["curvature"] = curvature
         funcs["path_length"] = pathLength
         funcs["final_velocity"] = finalVelocity
         funcs["initial_velocity"] = initialVelocity
-        # funcs['position'] = pos
+        funcs["pos"] = pos
         return funcs, False
 
     def sens(xDict, funcs):
@@ -522,7 +542,7 @@ def optimize_spline_path(
         dCurvatureDtfVal = dCurvatureDtf(controlPoints, tf, splineOrder)
 
         dObjectiveFunctionDControlPointsVal = dObjectiveFunctionDControlPoints(
-            controlPoints, tf, splineOrder, exploredPoints, sensingRadius
+            controlPoints, tf, splineOrder, sensingRadius, gridPoints
         )
         failed = False
         if np.any(np.isnan(dObjectiveFunctionDControlPointsVal)):
@@ -533,8 +553,15 @@ def optimize_spline_path(
                 dObjectiveFunctionDControlPointsVal,
             )
             failed = True
+            pos = funcs["pos"]
+            dists = np.sqrt(
+                ((gridPoints[:, np.newaxis, :] - pos[np.newaxis, :, :]) ** 2).sum(
+                    axis=2
+                )
+            )
+            print("dists", np.min(dists))
         dObjectiveFunctionDtfVal = dObjectiveFunctionDtf(
-            controlPoints, tf, splineOrder, exploredPoints, sensingRadius
+            controlPoints, tf, splineOrder, sensingRadius, gridPoints
         )
 
         dPathLengthDControlPointsVal = dPathLengthDControlPoints(
@@ -609,15 +636,20 @@ def optimize_spline_path(
     tf = assure_velocity_constraint(x0, velocityConstraints)
 
     # test objective function gradient
-    objTest = objective_funtion(x0, tf, splineOrder, exploredPoints, sensingRadius)
+    objTest = objective_funtion(x0, tf, splineOrder, sensingRadius, gridPoints)
 
     optProb = Optimization("path optimization", objfunc)
 
     optProb.addVarGroup(
-        name="control_points", nVars=2 * (numControlPoints), varType="c", value=x0
+        name="control_points",
+        nVars=2 * (numControlPoints),
+        varType="c",
+        value=x0,
+        lower=-12,
+        upper=12,
     )
     optProb.addVarGroup(name="tf", nVars=1, varType="c", value=tf, lower=0, upper=None)
-
+    #
     optProb.addConGroup(
         "velocity",
         num_constraint_samples,
@@ -648,21 +680,23 @@ def optimize_spline_path(
     )
 
     optProb.addObj("obj", scale=1.0 / abs(objTest))
+    # optProb.addObj("obj", scale=1.0)
 
     opt = OPT("ipopt")
     opt.options["print_level"] = 5
     opt.options["max_iter"] = 1000
-    opt.options["tol"] = 1e-8
+    opt.options["tol"] = 1e-12
     username = getpass.getuser()
     opt.options["hsllib"] = (
         "/home/" + username + "/packages/ThirdParty-HSL/.libs/libcoinhsl.so"
     )
     opt.options["linear_solver"] = "ma97"
     # opt.options["derivative_test_perturbation"] = 1e-3
-    # opt.options["derivative_test"] = "first-order"
+    opt.options["derivative_test"] = "first-order"
 
     sol = opt(optProb, sens=sens)
     # sol = opt(optProb, sens="FD")
+    print(sol)
     if sol.optInform["value"] != 0:
         print("Optimization failed")
 
@@ -678,7 +712,7 @@ def optimize_spline_path(
 
 def main():
     startingLocation = np.array([0.0, 0.0])
-    endingLocation = np.array([10.0, 10.0])
+    endingLocation = np.array([10.0, 5.0])
     initialVelocity = endingLocation - startingLocation
     agentSpeed = 1.0
     initialVelocity = initialVelocity / np.linalg.norm(initialVelocity) * agentSpeed
@@ -689,12 +723,10 @@ def main():
     turn_rate_constraints = (-50.0, 50.0)
     curvature_constraints = (-10.0, 10.0)
 
-    start = np.array([1, 1])
-    end = np.array([9, 9])
-    exploredPoints = np.linspace(start, end, 20)
+    exploredPoints = np.array([[-1, -1]])
 
     print("strait path length", np.linalg.norm(endingLocation - startingLocation))
-    pathLengthConstraint = 1.2 * np.linalg.norm(endingLocation - startingLocation)
+    pathLengthConstraint = 1.5 * np.linalg.norm(endingLocation - startingLocation)
 
     sensingRadius = 0.5
     spline = optimize_spline_path(
@@ -711,70 +743,6 @@ def main():
         exploredPoints,
         sensingRadius,
     )
-    t = np.linspace(0, spline.t[-spline.k - 1], 40)
-    exploredPoints = spline(t)
-    # controlPoints = np.array(
-    #     [
-    #         -3.622151738770622,
-    #         -1.688680812384926,
-    #         0.618505840195056,
-    #         0.181801501086766,
-    #         1.148128377990399,
-    #         0.961474808037863,
-    #         3.631197400400481,
-    #         2.530810554354952,
-    #         5.128236738925235,
-    #         2.90293097337522,
-    #         7.721958497178719,
-    #         4.273425211465368,
-    #         8.446450722220389,
-    #         4.700748489161621,
-    #         12.49223861393972,
-    #         6.923580831888148,
-    #     ]
-    # )
-    # tf = 15.285462104432714
-    #
-    # dObjectiveFunctionDControlPointsVal = dObjectiveFunctionDControlPoints(
-    #     controlPoints, tf, splineOrder, exploredPoints, sensingRadius
-    # )
-    # print("dObjectiveFunctionDControlPointsVal", dObjectiveFunctionDControlPointsVal)
-    #
-    start = time.time()
-    spline = optimize_spline_path(
-        startingLocation,
-        endingLocation,
-        initialVelocity,
-        initialVelocity,
-        numControlPoints,
-        splineOrder,
-        velocityConstraints,
-        turn_rate_constraints,
-        curvature_constraints,
-        pathLengthConstraint,
-        exploredPoints,
-        sensingRadius,
-    )
-    print("time", time.time() - start)
-    t = np.linspace(0, spline.t[-spline.k - 1], 40)
-    exploredPointsNew = spline(t)
-    exploredPoints = np.concatenate((exploredPoints, exploredPointsNew), axis=0)
-    start = time.time()
-    spline = optimize_spline_path(
-        startingLocation,
-        endingLocation,
-        initialVelocity,
-        initialVelocity,
-        numControlPoints,
-        splineOrder,
-        velocityConstraints,
-        turn_rate_constraints,
-        curvature_constraints,
-        pathLengthConstraint,
-        exploredPoints,
-        sensingRadius,
-    )
-    print("time", time.time() - start)
 
     fig, ax = plt.subplots()
     plot_spline(spline, exploredPoints, sensingRadius, fig, ax)
