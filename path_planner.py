@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import matplotlib
 import jax
 import time
+import scipy
 
 np.set_printoptions(precision=15)
 
@@ -30,6 +31,7 @@ from bspline.matrix_evaluation import (
 # jax.config.update("jax_disable_jit", True)
 
 numSamplesPerInterval = 10
+numSamplesPerIntervalObj = 30
 
 
 # def plot_spline(spline, pursuerPosition, pursuerRange, pursuerCaptureRange,pez_limit,useProbabalistic):
@@ -62,7 +64,7 @@ def plot_spline(
     x = np.linspace(minX, maxX, numPoints)
     y = np.linspace(minY, maxY, numPoints)
     [X, Y] = np.meshgrid(x, y)
-    posObjFunc = evaluate_spline(spline.c, spline.t)
+    posObjFunc = evaluate_spline(spline.c, spline.t, numSamplesPerIntervalObj)
     Z = batch_hazard_probs(
         np.array([X.flatten(), Y.flatten()]).T, posObjFunc, knownHazards
     )
@@ -176,7 +178,7 @@ def plot_test(centers, radiuses):
     plt.show()
 
 
-def evaluate_spline(controlPoints, knotPoints, numSamplesPerInterval=10):
+def evaluate_spline(controlPoints, knotPoints, numSamplesPerInterval):
     knotPoints = knotPoints.reshape((-1,))
     return matrix_bspline_evaluation_for_dataset(
         controlPoints.T, knotPoints, numSamplesPerInterval
@@ -213,7 +215,7 @@ def objective_funtion(controlPoints, tf, splineOrder, knownHazards, gridPoints):
     # dt = knotPoints[3] - knotPoints[0]
     # splineSampledt = 0.5
     # numSamplesPerIntervalObj = (dt / splineSampledt).astype(int)
-    pos = evaluate_spline(controlPoints, knotPoints, numSamplesPerInterval)
+    pos = evaluate_spline(controlPoints, knotPoints, numSamplesPerIntervalObj)
     return jnp.mean(batch_hazard_probs(gridPoints, pos, knownHazards))
 
 
@@ -383,7 +385,7 @@ def compute_spline_constraints(
     knotPoints,
     splineOrder,
 ):
-    pos = evaluate_spline(controlPoints, knotPoints)
+    pos = evaluate_spline(controlPoints, knotPoints, numSamplesPerInterval)
 
     turn_rate, velocity, agentHeadings = get_turn_rate_velocity_and_headings(
         controlPoints, knotPoints
@@ -494,6 +496,178 @@ def move_last_control_point_so_spline_passes_through_end(
     controlPoints[-2:, -2:] = x.reshape((2, 2))
 
     return controlPoints
+
+
+def generate_lawnmower_path(start, end, path_budget, rung_spacing):
+    start = np.array(start)
+    end = np.array(end)
+
+    # Compute the straight-line distance and unit direction vector
+    direction = end - start
+    straight_length = np.linalg.norm(direction)
+    unit_direction = direction / straight_length
+
+    # Compute the perpendicular direction for rungs
+    perp_direction = np.array([-unit_direction[1], unit_direction[0]])
+
+    # Compute number of rungs and spacing
+    num_rungs = int(straight_length // rung_spacing)
+    rung_positions = np.linspace(0, straight_length, num_rungs + 1)
+
+    # Compute remaining path budget after straight path
+    remaining_budget = path_budget - straight_length
+    if remaining_budget <= 0:
+        print("Path budget is too small for additional rungs.")
+        return []
+
+    # Compute the maximum rung length
+    max_rung_length = remaining_budget / (num_rungs) if num_rungs > 0 else 0
+
+    # Generate the path as a series of rectangles centered on the straight-line path
+    path = []
+    flip = 1  # Alternates rung direction
+    for i in range(num_rungs + 1):
+        base_point = start + rung_positions[i] * unit_direction
+        rung_end1 = base_point + (max_rung_length / 2) * perp_direction
+        rung_end2 = base_point - (max_rung_length / 2) * perp_direction
+
+        if i == 0:
+            path.append(start)
+            path.append(
+                rung_end2 if flip == 1 else rung_end1
+            )  # Ensure correct first rung direction
+        elif i == num_rungs:
+            path.append(rung_end1 if flip == 1 else rung_end2)
+            path.append(end)
+        else:
+            if flip == 1:
+                path.append(rung_end1)
+                path.append(rung_end2)
+            else:
+                path.append(rung_end2)
+                path.append(rung_end1)
+
+        flip *= -1  # Flip direction for next rung
+
+    return np.array(path)
+
+
+def sample_path(path, interval):
+    sampled_points = [path[0]]
+    total_distance = 0
+    for i in range(1, len(path)):
+        segment_start = path[i - 1]
+        segment_end = path[i]
+        segment_vector = segment_end - segment_start
+        segment_length = np.linalg.norm(segment_vector)
+
+        while total_distance + segment_length >= len(sampled_points) * interval:
+            remaining_distance = (len(sampled_points) * interval) - total_distance
+            new_point = (
+                segment_start + (remaining_distance / segment_length) * segment_vector
+            )
+            sampled_points.append(new_point)
+
+        total_distance += segment_length
+
+    return np.array(sampled_points)
+
+
+def fit_spline_to_path(path, num_control_points, splineOrder, startPoint, endPoint):
+    tf = 1
+    t = np.linspace(0, tf, len(path))
+
+    # num_control_points = params.numControlPoints
+    n_interior_knots = num_control_points - splineOrder - 1
+    qs = np.linspace(0, 1, n_interior_knots + 2)[1:-1]
+    knots = np.quantile(t, qs)
+
+    s = 0
+    tck_x = scipy.interpolate.splrep(t, path[:, 0], k=splineOrder, t=knots, s=s)
+    control_points_x = tck_x[1]
+    control_points_x = control_points_x[control_points_x != 0]
+    control_points_x[0] = startPoint[0]
+    control_points_x[-1] = endPoint[0]
+
+    tck_y = scipy.interpolate.splrep(t, path[:, 1], k=splineOrder, t=knots, s=s)
+    control_points_y = tck_y[1]
+    control_points_y = control_points_y[control_points_y != 0]
+    control_points_y[0] = startPoint[1]
+    control_points_y[-1] = endPoint[1]
+    combined_control_points = np.hstack(
+        (
+            control_points_x.reshape((len(control_points_x), 1)),
+            control_points_y.reshape((len(control_points_y), 1)),
+        )
+    )
+
+    combined_knot_points = tck_x[0]
+    return combined_control_points, combined_knot_points
+
+
+def create_initial_lawnmower_path(
+    startingLocation, endingLocation, numControlPoints, pathBudget, sensingRadius
+):
+    path = generate_lawnmower_path(
+        startingLocation, endingLocation, pathBudget, 2 * sensingRadius
+    )
+    path = sample_path(path, 0.05)
+    splineControlPoints, splineKnotPoints = fit_spline_to_path(
+        path, numControlPoints, 3, startingLocation, endingLocation
+    )
+
+    plot = True
+    if plot:
+        fig, ax = plt.subplots()
+        ax.plot(path[:, 0], path[:, 1], "r")
+        spline = create_spline(splineKnotPoints, splineControlPoints, 3)
+        t = np.linspace(splineKnotPoints[3], splineKnotPoints[-4], 1000)
+        points = spline(t)
+        ax.plot(points[:, 0], points[:, 1], "b")
+        plt.show()
+
+    return splineControlPoints
+
+
+def create_initial_spline(
+    startingLocation,
+    endingLocation,
+    numControlPoints,
+    splineOrder,
+    initialVelocity,
+    finalVelocity,
+    velocityConstraints,
+    pathBudget,
+):
+    tf = 1.0
+    knotPoints = create_unclamped_knot_points(0, tf, numControlPoints, splineOrder)
+
+    x0 = create_initial_lawnmower_path(
+        startingLocation, endingLocation, numControlPoints, pathBudget, 1.0
+    ).flatten()
+    # x0 = np.linspace(startingLocation, endingLocation, numControlPoints).flatten()
+
+    tf = assure_velocity_constraint(x0, velocityConstraints)
+    knotPoints = create_unclamped_knot_points(0, tf, numControlPoints, splineOrder)
+    x0 = move_first_control_point_so_spline_passes_through_start(
+        x0, knotPoints, startingLocation, initialVelocity
+    )
+    x0 = x0.flatten()
+    x0 = move_last_control_point_so_spline_passes_through_end(
+        x0, knotPoints, endingLocation, finalVelocity
+    )
+    x0 = x0.flatten()
+    tf = assure_velocity_constraint(x0, velocityConstraints)
+    knotPoints = create_unclamped_knot_points(0, tf, numControlPoints, splineOrder)
+    x0 = move_first_control_point_so_spline_passes_through_start(
+        x0, knotPoints, startingLocation, initialVelocity
+    )
+    x0 = x0.flatten()
+    x0 = move_last_control_point_so_spline_passes_through_end(
+        x0, knotPoints, endingLocation, finalVelocity
+    )
+    x0 = x0.flatten()
+    return x0, tf
 
 
 def optimize_spline_path(
@@ -641,23 +815,20 @@ def optimize_spline_path(
 
         return funcsSens, failed
 
-    tf = 1.0
-    knotPoints = create_unclamped_knot_points(0, tf, numControlPoints, splineOrder)
-
-    x0 = np.linspace(startingLocation, endingLocation, numControlPoints).flatten()
-    x0 = move_first_control_point_so_spline_passes_through_start(
-        x0, knotPoints, startingLocation, initialVelocity
+    x0, tf = create_initial_spline(
+        startingLocation,
+        endingLocation,
+        numControlPoints,
+        splineOrder,
+        initialVelocity,
+        finalVelocity,
+        velocityConstraints,
+        pathLengthConstraint,
     )
-    x0 = x0.flatten()
-    x0 = move_last_control_point_so_spline_passes_through_end(
-        x0, knotPoints, endingLocation, finalVelocity
-    )
-    x0 = x0.flatten()
 
+    # get size of constraints
     tempVelocityContstraints = get_spline_velocity(x0, 1, 3)
     num_constraint_samples = len(tempVelocityContstraints)
-
-    tf = assure_velocity_constraint(x0, velocityConstraints)
 
     # test objective function gradient
     objTest = objective_funtion(x0, tf, splineOrder, knownHazards, gridPoints)
@@ -742,24 +913,21 @@ def main():
     initialVelocity = initialVelocity / np.linalg.norm(initialVelocity) * agentSpeed
     velocityConstraints = np.array([0.5, 1.0])
 
-    numControlPoints = 14
+    numControlPoints = 24
     splineOrder = 3
     turn_rate_constraints = (-50.0, 50.0)
     curvature_constraints = (-10.0, 10.0)
     boundsX = (-1, 10)
     boundsY = (-1, 6)
 
-    pathLengthConstraint = 1.5 * np.linalg.norm(endingLocation - startingLocation)
+    pathLengthConstraint = 1.2 * np.linalg.norm(endingLocation - startingLocation)
 
-    # knownHazards = np.array([startingLocation, endingLocation])
-    # knownHazards = np.array(
-    #     [startingLocation, [1.0, 3.0], [4.0, 4.0], [7.0, 5.0], endingLocation]
-    # )
-    numKnownHazards = 5
-    knownHazardsX = np.random.uniform(boundsX[0], boundsX[1], (numKnownHazards,))
-    knownHazardsY = np.random.uniform(boundsY[0], boundsY[1], (numKnownHazards,))
-    knownHazards = np.array([knownHazardsX, knownHazardsY]).T
-    knownHazards = np.vstack([startingLocation, knownHazards, endingLocation])
+    # numKnownHazards = 5
+    # knownHazardsX = np.random.uniform(boundsX[0], boundsX[1], (numKnownHazards,))
+    # knownHazardsY = np.random.uniform(boundsY[0], boundsY[1], (numKnownHazards,))
+    # knownHazards = np.array([knownHazardsX, knownHazardsY]).T
+    # knownHazards = np.vstack([startingLocation, knownHazards, endingLocation])
+    knownHazards = np.vstack([startingLocation, endingLocation])
 
     spline = optimize_spline_path(
         startingLocation,
