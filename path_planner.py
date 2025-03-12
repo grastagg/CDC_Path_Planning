@@ -15,6 +15,7 @@ import time
 import scipy
 
 np.set_printoptions(precision=15)
+np.random.seed(12341)
 
 
 jax.config.update("jax_enable_x64", True)
@@ -94,6 +95,9 @@ def plot_hazard_prob(knownHazards, gridPoints, fig, ax):
     cbar = fig.colorbar(c, ax=ax, shrink=0.7)
     cbar.set_label("Hazard Probability", fontsize=26)
     cbar.ax.tick_params(labelsize=22)
+    ax.scatter(
+        knownHazards[:, 0], knownHazards[:, 1], c="r", marker="x", label="Hazard"
+    )
 
 
 @jax.jit
@@ -101,13 +105,13 @@ def safe_norm(x, y, eps=1e-6):
     return jnp.sqrt(jnp.sum((x - y) ** 2) + eps)  # Avoids sqrt(0)
 
 
-safe_norm_vectorized = jax.vmap(safe_norm, in_axes=(None, 0))
+safe_norm_vectorized = jax.jit(jax.vmap(safe_norm, in_axes=(None, 0)))
 
 
 @jax.jit
 def prior_hazard_distirbution(x, hazardLocations):
     # If there is prior knowledge of where hazards are located include it as a probability distribution here
-    baseProir = 0.1
+    baseProir = 0.5
     maxProir = 0.9
     decayRate = 0.5
     # dists = jnp.linalg.norm(hazardLocations - x, axis=1)
@@ -117,10 +121,10 @@ def prior_hazard_distirbution(x, hazardLocations):
     combinedHazardProbs = 1 - jnp.prod(1 - singleHazardProbs)
 
     # scale appropriately
-    # prior = baseProir + (maxProir - baseProir) * combinedHazardProbs
+    prior = baseProir + (maxProir - baseProir) * combinedHazardProbs
 
-    return combinedHazardProbs
-    # return prior
+    # return combinedHazardProbs
+    return prior
 
 
 @jax.jit
@@ -211,6 +215,7 @@ def objective_funtion(controlPoints, tf, splineOrder, knownHazards, gridPoints):
     # numSamplesPerIntervalObj = (dt / splineSampledt).astype(int)
     pos = evaluate_spline(controlPoints, knotPoints, numSamplesPerIntervalObj)
     return jnp.mean(batch_hazard_probs(gridPoints, pos, knownHazards))
+    # return jnp.sum(batch_hazard_probs(gridPoints, pos, knownHazards))
 
 
 @partial(jit, static_argnums=(2,))
@@ -272,54 +277,43 @@ def get_spline_heading(controlPoints, tf, splineOrder):
 
 
 def get_start_constraint(controlPoints):
-    cp1 = controlPoints[0:2]
-    cp2 = controlPoints[2:4]
-    cp3 = controlPoints[4:6]
-    return np.array((1 / 6) * cp1 + (2 / 3) * cp2 + (1 / 6) * cp3)
+    return (
+        (1 / 6) * controlPoints[0:2]
+        + (2 / 3) * controlPoints[2:4]
+        + (1 / 6) * controlPoints[4:6]
+    )
 
 
+@jax.jit
 def initial_velocity_constraint(controlPoints, tf):
     numControlPoints = len(controlPoints) // 2
     controlPoints = controlPoints.reshape((numControlPoints, 2))
     knotPoints = create_unclamped_knot_points(0, tf, numControlPoints, 3)
-    # velocityControlPoint1 = (
-    #     (3) / (knotPoints[3] - knotPoints[0]) * (controlPoints[1] - controlPoints[0])
-    # )
-    # velocityControlPoint2 = (
-    #     (3) / (knotPoints[3] - knotPoints[0]) * (controlPoints[2] - controlPoints[1])
-    # )
-    # velocity = 1 / 2 * (velocityControlPoint1 + velocityControlPoint2)
     velocity = evaluate_spline_derivative(controlPoints, knotPoints, 3, 1)
     return velocity[0]
 
 
+@jax.jit
 def final_velocity_constraint(controlPoints, tf):
     numControlPoints = len(controlPoints) // 2
     controlPoints = controlPoints.reshape((numControlPoints, 2))
     knotPoints = create_unclamped_knot_points(0, tf, numControlPoints, 3)
-    # velocityControlPointNMinus2 = (
-    #     (3) / (knotPoints[3] - knotPoints[0]) * (controlPoints[-2] - controlPoints[-3])
-    # )
-    # velocityControlPointNMinus1 = (
-    #     (3) / (knotPoints[3] - knotPoints[0]) * (controlPoints[-1] - controlPoints[-2])
-    # )
-    # velocity = 1 / 2 * (velocityControlPointNMinus2 + velocityControlPointNMinus1)
     velocity = evaluate_spline_derivative(controlPoints, knotPoints, 3, 1)
     return velocity[-1]
 
 
-############ Can speed thses up with simple anylitic solution ############
-dInitialVelocityDControlPoints = jacfwd(initial_velocity_constraint, argnums=0)
-dInitialVelocityDtf = jacfwd(initial_velocity_constraint, argnums=1)
-dFinalVelocityDControlPoints = jacfwd(final_velocity_constraint, argnums=0)
-dFinalVelocityDtf = jacfwd(final_velocity_constraint, argnums=1)
+dInitialVelocityDControlPoints = jax.jit(jacfwd(initial_velocity_constraint, argnums=0))
+dInitialVelocityDtf = jax.jit(jacfwd(initial_velocity_constraint, argnums=1))
+dFinalVelocityDControlPoints = jax.jit(jacfwd(final_velocity_constraint, argnums=0))
+dFinalVelocityDtf = jax.jit(jacfwd(final_velocity_constraint, argnums=1))
 
 
 def get_end_constraint(controlPoints):
-    cpnMinus2 = controlPoints[-6:-4]
-    cpnMinus1 = controlPoints[-4:-2]
-    cpn = controlPoints[-2:]
-    return (1 / 6) * cpnMinus2 + (2 / 3) * cpnMinus1 + (1 / 6) * cpn
+    return (
+        (1 / 6) * controlPoints[-6:-4]
+        + (2 / 3) * controlPoints[-4:-2]
+        + (1 / 6) * controlPoints[-2:]
+    )
 
 
 def get_start_constraint_jacobian(controlPoints):
@@ -346,47 +340,17 @@ def get_end_constraint_jacobian(controlPoints):
     return jac
 
 
+@jax.jit
 def get_turn_rate_velocity_and_headings(controlPoints, knotPoints):
     out_d1 = evaluate_spline_derivative(controlPoints, knotPoints, 3, 1)
     out_d2 = evaluate_spline_derivative(controlPoints, knotPoints, 3, 2)
-    v = np.linalg.norm(out_d1, axis=1)
-    u = np.cross(out_d1, out_d2) / (v**2)
-    heading = np.arctan2(out_d1[:, 1], out_d1[:, 0])
+    v = jnp.linalg.norm(out_d1, axis=1)
+    u = jnp.cross(out_d1, out_d2) / (v**2)
+    heading = jnp.arctan2(out_d1[:, 1], out_d1[:, 0])
     return u, v, heading
 
 
-#
-# def vectorized_point_in_convex_polygon(points, polygon_vertices):
-#     """
-#     Args:
-#         points: Shape (N, 2), array of query points.
-#         polygon_vertices: Shape (M, 2), ordered vertices of the convex polygon (CCW or CW).
-#
-#     Returns:
-#         Boolean array of shape (N,), where True = inside/on-edge.
-#     """
-#     polygon_vertices = jnp.asarray(polygon_vertices)
-#     points = jnp.asarray(points)
-#
-#     # Generate edges (V_i to V_{i+1})
-#     edges = jnp.roll(polygon_vertices, shift=-1, axis=0) - polygon_vertices  # (M, 2)
-#
-#     # Compute vectors from polygon vertices to query points
-#     vectors = points[jnp.newaxis, :, :] - polygon_vertices[:, jnp.newaxis, :]  # (M, N, 2)
-#
-#     # Cross products: edge_x * vector_y - edge_y * vector_x
-#     cross_products = jnp.cross(edges[:, jnp.newaxis, :], vectors)  # (M, N)
-#
-#     # Check sign consistency across edges for all points
-#     all_non_negative = jnp.all(cross_products >= -1e-8, axis=0)  # Allow small negatives for FP tolerance
-#     all_non_positive = jnp.all(cross_products <= 1e-8, axis=0)
-#     inside = all_non_negative | all_non_positive  # (N,)
-#
-#     return inside
-#
-# dControlPointsDPointsInPolygon = jacfwd(vectorized_point_in_convex_polygon, argnums=0)
-
-
+# @partial(jit, static_argnums=(2,))
 def compute_spline_constraints(
     controlPoints,
     knotPoints,
@@ -415,28 +379,33 @@ def create_spline(knotPoints, controlPoints, order):
     return spline
 
 
-dVelocityDControlPoints = jacfwd(get_spline_velocity)
-sdVelocityDtf = jacfwd(get_spline_velocity, argnums=1)
+dVelocityDControlPoints = jax.jit(jacfwd(get_spline_velocity), static_argnums=(2,))
+dVelocityDtf = jax.jit(jacfwd(get_spline_velocity, argnums=1), static_argnums=(2,))
 
-dTurnRateDControlPoints = jacfwd(get_spline_turn_rate)
-dTurnRateTf = jacfwd(get_spline_turn_rate, argnums=1)
+dTurnRateDControlPoints = jax.jit(jacfwd(get_spline_turn_rate), static_argnums=(2,))
+dTurnRateTf = jax.jit(jacfwd(get_spline_turn_rate, argnums=1), static_argnums=(2,))
 
-dCurvatureDControlPoints = jacfwd(get_spline_curvature)
-dCurvatureDtf = jacfwd(get_spline_curvature, argnums=1)
+dCurvatureDControlPoints = jax.jit(jacfwd(get_spline_curvature), static_argnums=(2,))
+dCurvatureDtf = jax.jit(jacfwd(get_spline_curvature, argnums=1), static_argnums=(2,))
 
-dObjectiveFunctionDControlPoints = jacfwd(objective_funtion, argnums=0)
-dObjectiveFunctionDtf = jacfwd(objective_funtion, argnums=1)
+dObjectiveFunctionDControlPoints = jax.jit(
+    jacfwd(objective_funtion, argnums=0), static_argnums=(2,)
+)
+dObjectiveFunctionDtf = jax.jit(
+    jacfwd(objective_funtion, argnums=1), static_argnums=(2,)
+)
 
-dPathLengthDControlPoints = jacfwd(get_spline_path_length, argnums=0)
-dPathLengthDtf = jacfwd(get_spline_path_length, argnums=1)
+dPathLengthDControlPoints = jax.jit(
+    jacfwd(get_spline_path_length, argnums=0), static_argnums=(2,)
+)
+dPathLengthDtf = jax.jit(jacfwd(get_spline_path_length, argnums=1), static_argnums=(2,))
 
 
-def assure_velocity_constraint(controlPoints, velocityBounds):
+def assure_velocity_constraint(controlPoints, velocityBounds, tf):
     splineOrder = 3
-    tf = np.linalg.norm(controlPoints[0] - controlPoints[-1]) / velocityBounds[1]
     v = get_spline_velocity(controlPoints, tf, splineOrder)
     while np.max(v) > velocityBounds[1]:
-        tf += 0.01
+        tf += 1.0
         v = get_spline_velocity(controlPoints, tf, splineOrder)
     return tf
 
@@ -654,7 +623,9 @@ def create_initial_spline(
     ).flatten()
     # x0 = np.linspace(startingLocation, endingLocation, numControlPoints).flatten()
 
-    tf = assure_velocity_constraint(x0, velocityConstraints)
+    start = time.time()
+    tf = np.linalg.norm(x0[0] - x0[-1]) / velocityConstraints[1]
+    tf = assure_velocity_constraint(x0, velocityConstraints, tf)
     knotPoints = create_unclamped_knot_points(0, tf, numControlPoints, splineOrder)
     x0 = move_first_control_point_so_spline_passes_through_start(
         x0, knotPoints, startingLocation, initialVelocity
@@ -664,7 +635,7 @@ def create_initial_spline(
         x0, knotPoints, endingLocation, finalVelocity
     )
     x0 = x0.flatten()
-    tf = assure_velocity_constraint(x0, velocityConstraints)
+    tf = assure_velocity_constraint(x0, velocityConstraints, tf)
     knotPoints = create_unclamped_knot_points(0, tf, numControlPoints, splineOrder)
     x0 = move_first_control_point_so_spline_passes_through_start(
         x0, knotPoints, startingLocation, initialVelocity
@@ -674,6 +645,7 @@ def create_initial_spline(
         x0, knotPoints, endingLocation, finalVelocity
     )
     x0 = x0.flatten()
+    print("time to find assure_velocity_constraint path: ", time.time() - start)
     return x0, tf
 
 
@@ -730,7 +702,7 @@ def optimize_spline_path(
         dVelocityDControlPointsVal = dVelocityDControlPoints(
             controlPoints, tf, splineOrder
         )
-        dVelocityDtfVal = sdVelocityDtf(controlPoints, tf, splineOrder)
+        dVelocityDtfVal = dVelocityDtf(controlPoints, tf, splineOrder)
         dTurnRateDControlPointsVal = dTurnRateDControlPoints(
             controlPoints, tf, splineOrder
         )
@@ -744,21 +716,6 @@ def optimize_spline_path(
             controlPoints, tf, splineOrder, knownHazards, gridPoints
         )
         failed = False
-        if np.any(np.isnan(dObjectiveFunctionDControlPointsVal)):
-            print("control points", controlPoints)
-            print("tf", tf)
-            print(
-                "dObjectiveFunctionDControlPointsVal",
-                dObjectiveFunctionDControlPointsVal,
-            )
-            failed = True
-            pos = funcs["pos"]
-            dists = np.sqrt(
-                ((gridPoints[:, np.newaxis, :] - pos[np.newaxis, :, :]) ** 2).sum(
-                    axis=2
-                )
-            )
-            print("dists", np.min(dists))
         dObjectiveFunctionDtfVal = dObjectiveFunctionDtf(
             controlPoints, tf, splineOrder, knownHazards, gridPoints
         )
@@ -816,6 +773,7 @@ def optimize_spline_path(
 
         return funcsSens, failed
 
+    start = time.time()
     x0, tf = create_initial_spline(
         startingLocation,
         endingLocation,
@@ -826,6 +784,7 @@ def optimize_spline_path(
         velocityConstraints,
         pathLengthConstraint,
     )
+    print("time to create initial spline", time.time() - start)
 
     # get size of constraints
     tempVelocityContstraints = get_spline_velocity(x0, 1, 3)
@@ -877,7 +836,7 @@ def optimize_spline_path(
     opt = OPT("ipopt")
     opt.options["print_level"] = 0
     opt.options["max_iter"] = 1000
-    opt.options["tol"] = 1e-6
+    opt.options["tol"] = 1e-4
     username = getpass.getuser()
     opt.options["hsllib"] = (
         "/home/" + username + "/packages/ThirdParty-HSL/.libs/libcoinhsl.so"
@@ -888,7 +847,8 @@ def optimize_spline_path(
 
     sol = opt(optProb, sens=sens)
     # sol = opt(optProb, sens="FD")
-    print(sol)
+    print("Objective value", sol.fStar)
+
     if sol.optInform["value"] != 0:
         print("Optimization failed")
 
@@ -911,61 +871,61 @@ def main():
     print("Initial velocity", initialVelocity)
     velocityConstraints = np.array([0.5, 1.0])
 
-    numControlPoints = 24
+    numControlPoints = 20
     splineOrder = 3
     turn_rate_constraints = (-50.0, 50.0)
     curvature_constraints = (-10.0, 10.0)
     boundsX = (-1, 10)
     boundsY = (-1, 6)
 
-    pathLengthConstraint = 2.5 * np.linalg.norm(endingLocation - startingLocation)
+    pathLengthConstraint = 2.0 * np.linalg.norm(endingLocation - startingLocation)
 
-    numKnownHazards = 2
-    knownHazardsX = np.random.uniform(boundsX[0], boundsX[1], (numKnownHazards,))
-    knownHazardsY = np.random.uniform(boundsY[0], boundsY[1], (numKnownHazards,))
-    knownHazards = np.array([knownHazardsX, knownHazardsY]).T
-    knownHazards = np.vstack([startingLocation, knownHazards, endingLocation])
-    # knownHazards = np.vstack([startingLocation, endingLocation])
+    # numKnownHazards = 5
+    # knownHazardsX = np.random.uniform(boundsX[0], boundsX[1], (numKnownHazards,))
+    # knownHazardsY = np.random.uniform(boundsY[0], boundsY[1], (numKnownHazards,))
+    # knownHazards = np.array([knownHazardsX, knownHazardsY]).T
+    # knownHazards = np.vstack([startingLocation, knownHazards, endingLocation])
+    knownHazards = np.vstack([startingLocation, endingLocation])
 
     gridPointsX = jnp.linspace(boundsX[0], boundsX[1], 50)
     gridPointsY = jnp.linspace(boundsY[0], boundsY[1], 50)
     [X, Y] = jnp.meshgrid(gridPointsX, gridPointsY)
     gridPoints = jnp.array([X.flatten(), Y.flatten()]).T
 
-    # spline = optimize_spline_path(
-    #     startingLocation,
-    #     endingLocation,
-    #     initialVelocity,
-    #     initialVelocity,
-    #     numControlPoints,
-    #     splineOrder,
-    #     velocityConstraints,
-    #     turn_rate_constraints,
-    #     curvature_constraints,
-    #     pathLengthConstraint,
-    #     knownHazards,
-    #     gridPoints,
-    # )
-    # start = time.time()
-    # spline = optimize_spline_path(
-    #     startingLocation,
-    #     endingLocation,
-    #     initialVelocity,
-    #     initialVelocity,
-    #     numControlPoints,
-    #     splineOrder,
-    #     velocityConstraints,
-    #     turn_rate_constraints,
-    #     curvature_constraints,
-    #     pathLengthConstraint,
-    #     knownHazards,
-    #     gridPoints,
-    # )
-    # print("Time to optimize spline", time.time() - start)
-    #
+    spline = optimize_spline_path(
+        startingLocation,
+        endingLocation,
+        initialVelocity,
+        initialVelocity,
+        numControlPoints,
+        splineOrder,
+        velocityConstraints,
+        turn_rate_constraints,
+        curvature_constraints,
+        pathLengthConstraint,
+        knownHazards,
+        gridPoints,
+    )
+    start = time.time()
+    spline = optimize_spline_path(
+        startingLocation,
+        endingLocation,
+        initialVelocity,
+        initialVelocity,
+        numControlPoints,
+        splineOrder,
+        velocityConstraints,
+        turn_rate_constraints,
+        curvature_constraints,
+        pathLengthConstraint,
+        knownHazards,
+        gridPoints,
+    )
+    print("Time to optimize spline", time.time() - start)
+
     fig, ax = plt.subplots()
-    plot_hazard_prob(knownHazards, gridPoints, fig, ax)
-    # plot_spline(spline, knownHazards, gridPoints, fig, ax)
+    # plot_hazard_prob(knownHazards, gridPoints, fig, ax)
+    plot_spline(spline, knownHazards, gridPoints, fig, ax)
     plt.show()
 
 
