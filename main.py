@@ -43,7 +43,8 @@ def main():
     # print("Total path budget", totalPathBudget)
     # print("Total strait line distance", totalStraitLineDistance)
     #
-    for i in range(1):
+
+    for i in range(len(edges)):
         edge = edges[i]
 
         nextVelocity = edges[i + 1][1] - edges[i + 1][0]
@@ -70,6 +71,7 @@ def main():
             knownHazards=original_nodes,
             gridPoints=cellXYList[i],
         )
+        initialVelocity = nextVelocity
         fig, ax = plt.subplots()
         # plot_hazard_prob(knownHazards, gridPoints, fig, ax)
         path_planner.plot_spline(spline, original_nodes, cellXYList[i], fig, ax)

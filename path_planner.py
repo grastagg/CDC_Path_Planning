@@ -119,7 +119,7 @@ def prior_hazard_distirbution(x, hazardLocations):
     # If there is prior knowledge of where hazards are located include it as a probability distribution here
     baseProir = 0.5
     maxProir = 0.9
-    decayRate = 0.2
+    decayRate = 0.25
     # dists = jnp.linalg.norm(hazardLocations - x, axis=1)
     dists = safe_norm_vectorized(x, hazardLocations)
 
@@ -153,7 +153,7 @@ def hazard_posterior_prob(x, searched_points, knownHazards):
         Posterior probability (0-1) of hazard existing at x
     """
 
-    steepness = 2.0
+    steepness = 1.5
     false_alarm = 0.0
     prior = prior_hazard_distirbution(x, knownHazards)
 
