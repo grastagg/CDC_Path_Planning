@@ -55,15 +55,21 @@ def plot_spline(
 
     pos = spline(t)
     ax.plot(pos[:, 0], pos[:, 1], "r", label="Path")
+    ax.set_aspect("equal")
 
     posObjFunc = evaluate_spline(spline.c, spline.t, numSamplesPerIntervalObj)
     Z = batch_hazard_probs(gridPoints, posObjFunc, knownHazards)
 
-    z_size = int(np.sqrt(Z.shape[0]))
-    gridPointsX = gridPoints[:, 0].reshape((z_size, z_size))
-    gridPointsY = gridPoints[:, 1].reshape((z_size, z_size))
-    Z = Z.reshape((z_size, z_size))
-    c = ax.pcolormesh(gridPointsX, gridPointsY, Z, vmin=0, vmax=1)
+    # z_size = int(np.sqrt(Z.shape[0]))
+    # gridPointsX = gridPoints[:, 0].reshape((z_size, z_size))
+    # gridPointsY = gridPoints[:, 1].reshape((z_size, z_size))
+    # Z = Z.reshape((z_size, z_size))
+    # c = ax.pcolormesh(gridPointsX, gridPointsY, Z, vmin=0, vmax=1)
+    #
+
+    c = ax.tripcolor(
+        gridPoints[:, 0], gridPoints[:, 1], Z, shading="gouraud", vmin=0, vmax=1
+    )
     cbar = fig.colorbar(c, ax=ax, shrink=0.7)
     cbar.set_label("Hazard Probability", fontsize=26)
     cbar.ax.tick_params(labelsize=22)
@@ -71,8 +77,8 @@ def plot_spline(
     ax.scatter(
         knownHazards[:, 0], knownHazards[:, 1], c="r", marker="x", label="Hazard"
     )
-    ax.scatter(pos[0, 0], pos[0, 1], c="g", marker="o", label="Start Node")
-    ax.scatter(pos[-1, 0], pos[-1, 1], c="b", marker="o", label="End Node")
+    # ax.scatter(pos[0, 0], pos[0, 1], c="g", marker="o", label="Start Node")
+    # ax.scatter(pos[-1, 0], pos[-1, 1], c="b", marker="o", label="End Node")
 
     ax.set_aspect(1)
     # c = plt.Circle(pursuerPosition, pursuerRange + pursuerCaptureRange, fill=False)
@@ -113,7 +119,7 @@ def prior_hazard_distirbution(x, hazardLocations):
     # If there is prior knowledge of where hazards are located include it as a probability distribution here
     baseProir = 0.5
     maxProir = 0.9
-    decayRate = 0.5
+    decayRate = 0.2
     # dists = jnp.linalg.norm(hazardLocations - x, axis=1)
     dists = safe_norm_vectorized(x, hazardLocations)
 
@@ -147,7 +153,7 @@ def hazard_posterior_prob(x, searched_points, knownHazards):
         Posterior probability (0-1) of hazard existing at x
     """
 
-    steepness = 5.0
+    steepness = 2.0
     false_alarm = 0.0
     prior = prior_hazard_distirbution(x, knownHazards)
 
@@ -618,12 +624,11 @@ def create_initial_spline(
     tf = 1.0
     knotPoints = create_unclamped_knot_points(0, tf, numControlPoints, splineOrder)
 
-    x0 = create_initial_lawnmower_path(
-        startingLocation, endingLocation, numControlPoints, pathBudget, 1.0
-    ).flatten()
-    # x0 = np.linspace(startingLocation, endingLocation, numControlPoints).flatten()
+    # x0 = create_initial_lawnmower_path(
+    #     startingLocation, endingLocation, numControlPoints, pathBudget, 1.0
+    # ).flatten()
+    x0 = np.linspace(startingLocation, endingLocation, numControlPoints).flatten()
 
-    start = time.time()
     tf = np.linalg.norm(x0[0] - x0[-1]) / velocityConstraints[1]
     tf = assure_velocity_constraint(x0, velocityConstraints, tf)
     knotPoints = create_unclamped_knot_points(0, tf, numControlPoints, splineOrder)
@@ -645,7 +650,6 @@ def create_initial_spline(
         x0, knotPoints, endingLocation, finalVelocity
     )
     x0 = x0.flatten()
-    print("time to find assure_velocity_constraint path: ", time.time() - start)
     return x0, tf
 
 
@@ -797,8 +801,8 @@ def optimize_spline_path(
         nVars=2 * (numControlPoints),
         varType="c",
         value=x0,
-        lower=-50,
-        upper=50,
+        lower=-1000,
+        upper=1000,
     )
     optProb.addVarGroup(name="tf", nVars=1, varType="c", value=tf, lower=0, upper=None)
     #
@@ -834,7 +838,7 @@ def optimize_spline_path(
     optProb.addObj("obj", scale=1.0)
 
     opt = OPT("ipopt")
-    opt.options["print_level"] = 0
+    opt.options["print_level"] = 5
     opt.options["max_iter"] = 1000
     opt.options["tol"] = 1e-4
     username = getpass.getuser()
@@ -846,7 +850,6 @@ def optimize_spline_path(
     # opt.options["derivative_test"] = "first-order"
 
     sol = opt(optProb, sens=sens)
-    # sol = opt(optProb, sens="FD")
     print("Objective value", sol.fStar)
 
     if sol.optInform["value"] != 0:
@@ -864,14 +867,16 @@ def optimize_spline_path(
 
 def main():
     startingLocation = np.array([0.0, 0.0])
-    endingLocation = np.array([10.0, 5.0])
+
+    # endingLocation = np.array([2.59262, 52.9140])
+    endingLocation = np.array([22.59262, 52.9140])
     initialVelocity = endingLocation - startingLocation
     agentSpeed = 1.0
     initialVelocity = initialVelocity / np.linalg.norm(initialVelocity) * agentSpeed
-    print("Initial velocity", initialVelocity)
-    velocityConstraints = np.array([0.5, 1.0])
+    endVelocity = np.array([1.0, 0.0])
+    velocityConstraints = np.array([0.0, 1.0])
 
-    numControlPoints = 20
+    numControlPoints = 25
     splineOrder = 3
     turn_rate_constraints = (-50.0, 50.0)
     curvature_constraints = (-10.0, 10.0)
@@ -896,7 +901,7 @@ def main():
         startingLocation,
         endingLocation,
         initialVelocity,
-        initialVelocity,
+        endVelocity,
         numControlPoints,
         splineOrder,
         velocityConstraints,
@@ -911,7 +916,7 @@ def main():
         startingLocation,
         endingLocation,
         initialVelocity,
-        initialVelocity,
+        endVelocity,
         numControlPoints,
         splineOrder,
         velocityConstraints,

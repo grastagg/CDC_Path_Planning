@@ -3,6 +3,9 @@ import matplotlib.pyplot as plt
 from pyvrp import Model
 from pyvrp.stop import MaxRuntime
 from scipy.spatial import distance_matrix
+import jax
+import jax.numpy as jnp
+import time
 
 
 def generate_random_nodes(domain, total_nodes=15, seed=2):
@@ -177,6 +180,34 @@ def dist_point_to_segment(px, py, seg):
         return np.hypot(px - proj[0], py - proj[1])
 
 
+####Grant updated dist_point_to_segment to vectorize so distance to all points can be found at same time
+def dist_points_to_segment(points, p1, p2):
+    # Vector from p1 to p2
+    diff = p2 - p1
+
+    # Squared norm of the segment vector (diff)
+    norm = jnp.dot(diff, diff)
+
+    # Projection of points onto the segment, normalized
+    u = jnp.dot(points - p1, diff) / norm
+
+    # Clip u to ensure it falls within the segment [0, 1]
+    u = jnp.clip(u, 0, 1)
+
+    # Calculate the closest point on the segment
+    p = p1 + u[..., None] * diff  # Broadcasting to handle multiple points
+
+    # Distance from each point to the closest point on the segment
+    dp = p - points
+    dist = jnp.linalg.norm(dp, axis=1)
+
+    return dist
+
+
+##### now vectorize with respect to segments so distance from all segments to all points can be found
+dist_points_to_segments = jax.vmap(dist_points_to_segment, in_axes=(None, 0, 0))
+
+
 def min_dist_to_edges(px, py, edges):
     if not edges:
         return 0.0
@@ -185,6 +216,7 @@ def min_dist_to_edges(px, py, edges):
 
 def extract_edges_from_solution(result, nodes):
     edges = []
+    # add depot to nodes
     for route in result.best.routes():
         if len(route) < 2:
             continue
@@ -310,24 +342,38 @@ def approximate_node_voronoi(nodes, domain, grid_size=100):
     return assignment_matrix
 
 
+####### vectorized version of approximate_edge_voronoi
 def approximate_edge_voronoi(edges, domain, grid_size=100):
-    xmin, xmax, ymin, ymax = domain
-    dx = (xmax - xmin) / grid_size
-    dy = (ymax - ymin) / grid_size
-    assignment_matrix = np.zeros((grid_size, grid_size), dtype=int)
-    for i in range(grid_size):
-        for j in range(grid_size):
-            cx = xmin + (i + 0.5) * dx
-            cy = ymin + (j + 0.5) * dy
-            best_dist = 1e12
-            best_idx = 0
-            for e_idx, seg in enumerate(edges):
-                d = dist_point_to_segment(cx, cy, seg)
-                if d < best_dist:
-                    best_dist = d
-                    best_idx = e_idx
-            assignment_matrix[j, i] = best_idx
-    return assignment_matrix
+    xPositions = np.linspace(domain[0], domain[1], grid_size, endpoint=False)
+    yPositions = np.linspace(domain[2], domain[3], grid_size, endpoint=False)
+    [cx, cy] = np.meshgrid(xPositions, yPositions)
+    points = np.column_stack((cx.flatten(), cy.flatten()))
+    edges = np.array(edges)
+    p1 = edges[:, 0]
+    p2 = edges[:, 1]
+    dist = dist_points_to_segments(points, p1, p2)
+    assignment_matrix = np.argmin(dist, axis=0)
+    return assignment_matrix, points
+
+
+# def approximate_edge_voronoi(edges, domain, grid_size=100):
+#     xmin, xmax, ymin, ymax = domain
+#     dx = (xmax - xmin) / grid_size
+#     dy = (ymax - ymin) / grid_size
+#     assignment_matrix = np.zeros((grid_size, grid_size), dtype=int)
+#     for i in range(grid_size):
+#         for j in range(grid_size):
+#             cx = xmin + (i + 0.5) * dx
+#             cy = ymin + (j + 0.5) * dy
+#             best_dist = 1e12
+#             best_idx = 0
+#             for e_idx, seg in enumerate(edges):
+#                 d = dist_point_to_segment(cx, cy, seg)
+#                 if d < best_dist:
+#                     best_dist = d
+#                     best_idx = e_idx
+#             assignment_matrix[j, i] = best_idx
+#     return assignment_matrix
 
 
 def calculate_partition_areas(assignment_matrix, domain, grid_size):
@@ -400,11 +446,13 @@ def plot_voronoi_with_area(
     )
 
     unique_labels = np.unique(assignment_matrix)
+    print("unique labels", unique_labels)
     for label in unique_labels:
         indices = np.where(assignment_matrix == label)
         if indices[0].size > 0:
             cx = xmin + (np.mean(indices[1]) + 0.5) * dx
             cy = ymin + (np.mean(indices[0]) + 0.5) * dy
+            print("label", label, "cx", cx, "cy", cy)
             area = partition_areas.get(label, 0)
             ax.text(
                 cx,
@@ -421,7 +469,44 @@ def plot_voronoi_with_area(
     ax.set_aspect("equal")
 
 
-if __name__ == "__main__":
+def find_edges_budget_and_cells(knownNodes, domain, max_distance):
+    m_orig, result_orig = build_and_solve_vrp(
+        knownNodes, num_vehicles=1, max_distance=max_distance, seed=42
+    )
+    edges = extract_edges_from_solution(result_orig, knownNodes)
+    edges.insert(0, ((0, 0), edges[0][0]))
+    edges.append((edges[-1][1], (0, 0)))
+    grid_size = 100
+    edge_vor, cellPoints = approximate_edge_voronoi(edges, domain, grid_size=grid_size)
+    cellXYList = [cellPoints[edge_vor == i] for i in range(len(edges))]
+    edge_vor = edge_vor.reshape(grid_size, grid_size)
+
+    partition_areas = calculate_partition_areas(edge_vor, domain, grid_size=grid_size)
+    total_area = (domain[1] - domain[0]) * (domain[3] - domain[2])
+    path_budget = np.array(
+        [
+            max_distance * partition_area / total_area
+            for partition_area in partition_areas.values()
+        ]
+    )
+
+    plot = False
+    if plot:
+        fig, ax = plt.subplots()
+        plot_voronoi_with_area(
+            ax,
+            edge_vor,
+            partition_areas,
+            domain,
+            grid_size=200,
+            title="Edge-based Voronoi",
+        )
+        plot_vrp_solution(ax, knownNodes, 15, result_orig, "Node-based CVT + Voronoi")
+        plt.show()
+    return np.array(edges), path_budget, cellXYList
+
+
+def main():
     domain = (0, 100, 0, 100)
     num_original = 15
     num_virtual = 5
@@ -465,6 +550,9 @@ if __name__ == "__main__":
     # )
 
     edges = extract_edges_from_solution(result_orig, original_nodes)
+    edges.insert(0, ((0, 0), edges[0][0]))
+    edges.append((edges[-1][1], (0, 0)))
+    print("edges", edges)
 
     # pseudo_nodes_edge_cvt = weighted_cvt_route_far(
     #     original_nodes,
@@ -517,23 +605,26 @@ if __name__ == "__main__":
 
     fig2, axs2 = plt.subplots(1, 3, figsize=(12, 4))
 
-    axs2[0].scatter(
-        original_nodes[:, 0], original_nodes[:, 1], c="blue", label="Original Nodes"
-    )
-    for seg in edges:
-        (x1, y1), (x2, y2) = seg
-        axs2[0].plot([x1, x2], [y1, y2], color="green", linewidth=2)
-    axs2[0].set_title("Original (Nodes + Edges)")
-    axs2[0].set_aspect("equal")
-    axs2[0].legend()
+    # axs2[0].scatter(
+    #     original_nodes[:, 0], original_nodes[:, 1], c="blue", label="Original Nodes"
+    # )
+    # for seg in edges:
+    #     (x1, y1), (x2, y2) = seg
+    #     axs2[0].plot([x1, x2], [y1, y2], color="green", linewidth=2)
+    # axs2[0].set_title("Original (Nodes + Edges)")
+    # axs2[0].set_aspect("equal")
+    # axs2[0].legend()
+    #
+    # node_vor = approximate_node_voronoi(original_nodes, domain, grid_size=200)
+    # plot_voronoi(axs2[1], node_vor, domain, title="Node-based Voronoi")
+    # plot_vrp_solution(
+    #     axs2[1], original_nodes, num_original, result_orig, "Node-based CVT + Voronoi"
+    # )
 
-    node_vor = approximate_node_voronoi(original_nodes, domain, grid_size=200)
-    plot_voronoi(axs2[1], node_vor, domain, title="Node-based Voronoi")
-    plot_vrp_solution(
-        axs2[1], original_nodes, num_original, result_orig, "Node-based CVT + Voronoi"
-    )
+    start = time.time()
+    edge_vor = approximate_edge_voronoi(edges, domain, grid_size=1000)
+    print("time to compute edge voronoi", time.time() - start)
 
-    edge_vor = approximate_edge_voronoi(edges, domain, grid_size=200)
     partition_areas = calculate_partition_areas(edge_vor, domain, grid_size=200)
     plot_voronoi_with_area(
         axs2[2],
@@ -546,8 +637,6 @@ if __name__ == "__main__":
     plot_vrp_solution(
         axs2[2], original_nodes, num_original, result_orig, "Node-based CVT + Voronoi"
     )
-
-    print(partition_areas)
 
     # gen_vor = approximate_generalized_voronoi(
     #     original_nodes, edges, domain, grid_size=200
@@ -605,3 +694,7 @@ if __name__ == "__main__":
 
     # plt.tight_layout()
     # plt.show()
+
+
+if __name__ == "__main__":
+    main()

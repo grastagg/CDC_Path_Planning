@@ -282,7 +282,7 @@ results_node_cvt = {"ECR": [], "EDV": [], "dmax": [], "ANE": []}
 results_edge_cvt = {"ECR": [], "EDV": [], "dmax": [], "ANE": []}
 results_initial = {"num_original": [], "num_virtual": []}
 
-num_cases = 100
+num_cases = 1
 
 for seed in range(num_cases):
     num_original = random.randint(5, 15)  # Randomly select between 5 and 15
