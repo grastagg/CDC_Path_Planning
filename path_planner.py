@@ -40,6 +40,7 @@ def plot_spline(
     spline,
     knownHazards,
     gridPoints,
+    splineSampledt,
     fig,
     ax,
 ):
@@ -50,6 +51,7 @@ def plot_spline(
     ax.set_ylabel("Y", fontsize=26)
     ax.tick_params(axis="x", labelsize=26)
     ax.tick_params(axis="y", labelsize=26)
+    knotPoints = spline.t
 
     pos = spline(t)
 
@@ -57,7 +59,9 @@ def plot_spline(
     ax.plot(pos[:, 0], pos[:, 1], "r", label="Path")
     ax.set_aspect("equal")
 
-    posObjFunc = evaluate_spline(spline.c, spline.t, numSamplesPerIntervalObj)
+    dt = knotPoints[3] - knotPoints[0]
+    numSamples = (dt / splineSampledt).astype(int).item()
+    posObjFunc = evaluate_spline(spline.c, spline.t, numSamples)
     Z = batch_hazard_probs(gridPoints, posObjFunc, knownHazards)
 
     # z_size = int(np.sqrt(Z.shape[0]))
@@ -153,7 +157,7 @@ def hazard_posterior_prob(x, searched_points, knownHazards):
         Posterior probability (0-1) of hazard existing at x
     """
 
-    steepness = 1.5
+    steepness = 1.0
     false_alarm = 0.0
     prior = prior_hazard_distirbution(x, knownHazards)
 
@@ -211,15 +215,16 @@ def create_unclamped_knot_points(t0, tf, numControlPoints, splineOrder):
     return knots
 
 
-@partial(jit, static_argnums=(2,))
-def objective_funtion(controlPoints, tf, splineOrder, knownHazards, gridPoints):
+@partial(jit, static_argnums=(2, 3))
+def objective_funtion(
+    controlPoints, tf, splineOrder, numSamples, knownHazards, gridPoints
+):
     numControlPoints = int(len(controlPoints) / 2)
     controlPoints = controlPoints.reshape((numControlPoints, 2))
     knotPoints = create_unclamped_knot_points(0, tf, numControlPoints, splineOrder)
-    # dt = knotPoints[3] - knotPoints[0]
-    # splineSampledt = 0.5
-    # numSamplesPerIntervalObj = (dt / splineSampledt).astype(int)
-    pos = evaluate_spline(controlPoints, knotPoints, numSamplesPerIntervalObj)
+    # dt = (knotPoints[3] - knotPoints[0]).item()
+    pos = evaluate_spline(controlPoints, knotPoints, numSamples)
+    # pos = evaluate_spline(controlPoints, knotPoints, numSamplesPerIntervalObj)
     return jnp.mean(batch_hazard_probs(gridPoints, pos, knownHazards))
     # return jnp.sum(batch_hazard_probs(gridPoints, pos, knownHazards))
 
@@ -395,10 +400,10 @@ dCurvatureDControlPoints = jax.jit(jacfwd(get_spline_curvature), static_argnums=
 dCurvatureDtf = jax.jit(jacfwd(get_spline_curvature, argnums=1), static_argnums=(2,))
 
 dObjectiveFunctionDControlPoints = jax.jit(
-    jacfwd(objective_funtion, argnums=0), static_argnums=(2,)
+    jacfwd(objective_funtion, argnums=0), static_argnums=(2, 3)
 )
 dObjectiveFunctionDtf = jax.jit(
-    jacfwd(objective_funtion, argnums=1), static_argnums=(2,)
+    jacfwd(objective_funtion, argnums=1), static_argnums=(2, 3)
 )
 
 dPathLengthDControlPoints = jax.jit(
@@ -666,6 +671,7 @@ def optimize_spline_path(
     pathLengthConstraint,
     knownHazards,
     gridPoints,
+    splineSampledt,
 ):
     def objfunc(xDict):
         tf = xDict["tf"]
@@ -681,8 +687,16 @@ def optimize_spline_path(
         velocity, turn_rate, curvature, pos, pathLength = compute_spline_constraints(
             controlPoints, knotPoints, splineOrder
         )
+
+        dt = knotPoints[3] - knotPoints[0]
+        numSamples = (dt / splineSampledt).astype(int).item()
         obj = objective_funtion(
-            controlPoints.flatten(), tf, splineOrder, knownHazards, gridPoints
+            controlPoints.flatten(),
+            tf,
+            splineOrder,
+            numSamples,
+            knownHazards,
+            gridPoints,
         )
 
         funcs["obj"] = obj
@@ -693,6 +707,7 @@ def optimize_spline_path(
         funcs["final_velocity"] = finalVelocity
         funcs["initial_velocity"] = initialVelocity
         funcs["pos"] = pos
+        funcs["numSamples"] = numSamples
         return funcs, False
 
     def sens(xDict, funcs):
@@ -716,12 +731,13 @@ def optimize_spline_path(
         )
         dCurvatureDtfVal = dCurvatureDtf(controlPoints, tf, splineOrder)
 
+        numSamples = funcs["numSamples"]
         dObjectiveFunctionDControlPointsVal = dObjectiveFunctionDControlPoints(
-            controlPoints, tf, splineOrder, knownHazards, gridPoints
+            controlPoints, tf, splineOrder, numSamples, knownHazards, gridPoints
         )
         failed = False
         dObjectiveFunctionDtfVal = dObjectiveFunctionDtf(
-            controlPoints, tf, splineOrder, knownHazards, gridPoints
+            controlPoints, tf, splineOrder, numSamples, knownHazards, gridPoints
         )
 
         dPathLengthDControlPointsVal = dPathLengthDControlPoints(

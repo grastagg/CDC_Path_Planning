@@ -28,6 +28,7 @@ def main():
 
     numControlPoints = 20
     splineOrder = 3
+    splineSampledt = 0.1
     turn_rate_constraints = (-50.0, 50.0)
     curvature_constraints = (-10.0, 10.0)
     #
@@ -70,11 +71,14 @@ def main():
             pathLengthConstraint=path_budget[i],
             knownHazards=original_nodes,
             gridPoints=cellXYList[i],
+            splineSampledt=splineSampledt,
         )
         initialVelocity = nextVelocity
         fig, ax = plt.subplots()
         # plot_hazard_prob(knownHazards, gridPoints, fig, ax)
-        path_planner.plot_spline(spline, original_nodes, cellXYList[i], fig, ax)
+        path_planner.plot_spline(
+            spline, original_nodes, cellXYList[i], splineSampledt, fig, ax
+        )
         plt.show()
         print(edge)
 
