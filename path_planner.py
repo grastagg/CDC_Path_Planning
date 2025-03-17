@@ -37,12 +37,7 @@ numSamplesPerIntervalObj = 30
 
 # def plot_spline(spline, pursuerPosition, pursuerRange, pursuerCaptureRange,pez_limit,useProbabalistic):
 def plot_spline(
-    spline,
-    knownHazards,
-    gridPoints,
-    splineSampledt,
-    fig,
-    ax,
+    spline, knownHazards, gridPoints, splineSampledt, fig, ax, plotColorbar
 ):
     t0 = spline.t[spline.k]
     tf = spline.t[-1 - spline.k]
@@ -74,9 +69,10 @@ def plot_spline(
     c = ax.tripcolor(
         gridPoints[:, 0], gridPoints[:, 1], Z, shading="gouraud", vmin=0, vmax=1
     )
-    cbar = fig.colorbar(c, ax=ax, shrink=0.7)
-    cbar.set_label("Hazard Probability", fontsize=26)
-    cbar.ax.tick_params(labelsize=22)
+    if plotColorbar:
+        cbar = fig.colorbar(c, ax=ax, shrink=0.7)
+        cbar.set_label("Hazard Probability", fontsize=26)
+        cbar.ax.tick_params(labelsize=22)
 
     ax.scatter(
         knownHazards[:, 0], knownHazards[:, 1], c="r", marker="x", label="Hazard"
@@ -89,7 +85,8 @@ def plot_spline(
     # ax.add_artist(c)
     ax.set_xlabel("X")
     ax.set_ylabel("Y")
-    ax.legend(fontsize=20)
+    if plotColorbar:
+        ax.legend(fontsize=20)
     ax.set_title("Optimized Path", fontsize=26)
     fig.set_size_inches(20, 10)
 
@@ -121,9 +118,9 @@ safe_norm_vectorized = jax.jit(jax.vmap(safe_norm, in_axes=(None, 0)))
 @jax.jit
 def prior_hazard_distirbution(x, hazardLocations):
     # If there is prior knowledge of where hazards are located include it as a probability distribution here
-    baseProir = 0.5
+    baseProir = 0.0
     maxProir = 0.9
-    decayRate = 0.25
+    decayRate = 0.05
     # dists = jnp.linalg.norm(hazardLocations - x, axis=1)
     dists = safe_norm_vectorized(x, hazardLocations)
 
@@ -157,7 +154,7 @@ def hazard_posterior_prob(x, searched_points, knownHazards):
         Posterior probability (0-1) of hazard existing at x
     """
 
-    steepness = 1.0
+    steepness = 2.0
     false_alarm = 0.0
     prior = prior_hazard_distirbution(x, knownHazards)
 
@@ -186,6 +183,13 @@ batch_hazard_probs = jit(jax.vmap(hazard_posterior_prob, in_axes=(0, None, None)
 
 @partial(jit, static_argnums=(2,))
 def evaluate_spline(controlPoints, knotPoints, numSamplesPerInterval):
+    knotPoints = knotPoints.reshape((-1,))
+    return matrix_bspline_evaluation_for_dataset(
+        controlPoints.T, knotPoints, numSamplesPerInterval
+    )
+
+
+def evaluate_spline_not_jit(controlPoints, knotPoints, numSamplesPerInterval):
     knotPoints = knotPoints.reshape((-1,))
     return matrix_bspline_evaluation_for_dataset(
         controlPoints.T, knotPoints, numSamplesPerInterval
@@ -629,10 +633,10 @@ def create_initial_spline(
     tf = 1.0
     knotPoints = create_unclamped_knot_points(0, tf, numControlPoints, splineOrder)
 
-    # x0 = create_initial_lawnmower_path(
-    #     startingLocation, endingLocation, numControlPoints, pathBudget, 1.0
-    # ).flatten()
-    x0 = np.linspace(startingLocation, endingLocation, numControlPoints).flatten()
+    x0 = create_initial_lawnmower_path(
+        startingLocation, endingLocation, numControlPoints, pathBudget, 1.0
+    ).flatten()
+    # x0 = np.linspace(startingLocation, endingLocation, numControlPoints).flatten()
 
     tf = np.linalg.norm(x0[0] - x0[-1]) / velocityConstraints[1]
     tf = assure_velocity_constraint(x0, velocityConstraints, tf)
@@ -690,6 +694,7 @@ def optimize_spline_path(
 
         dt = knotPoints[3] - knotPoints[0]
         numSamples = (dt / splineSampledt).astype(int).item()
+        # numSamples = 10
         obj = objective_funtion(
             controlPoints.flatten(),
             tf,
@@ -854,7 +859,7 @@ def optimize_spline_path(
     optProb.addObj("obj", scale=1.0)
 
     opt = OPT("ipopt")
-    opt.options["print_level"] = 5
+    opt.options["print_level"] = 0
     opt.options["max_iter"] = 1000
     opt.options["tol"] = 1e-4
     username = getpass.getuser()

@@ -152,11 +152,19 @@ def matrix_bspline_evaluation_for_dataset(
     control_points, knot_points, num_points_per_interval
 ):
     """
-    This function evaluates the B-spline for a given time dataset using JAX.
+    Evaluates the B-spline for a given time dataset using JAX.
+
+    Parameters:
+    - control_points: Control points of the B-spline. Should be a 2D array with shape (2, number_of_control_points).
+    - knot_points: Knot points of the B-spline.
+    - num_points_per_interval: Number of points to evaluate per interval.
+
+    Returns:
+    - spline_data: Evaluated B-spline data.
     """
+
     num_ppi = num_points_per_interval
-    dimension = get_dimension(control_points)
-    number_of_control_points = count_number_of_control_points(control_points)
+    number_of_control_points = control_points.shape[1]
     order = len(knot_points) - number_of_control_points - 1
     num_intervals = number_of_control_points - order
 
@@ -167,44 +175,29 @@ def matrix_bspline_evaluation_for_dataset(
     L = (steps_array**powers).T
 
     # Find M matrix
-    M = get_M_matrix(0, order, [], False)
+    M = get_M_matrix(0, order, [])
 
     # Evaluate spline data
-    if dimension > 1:
-        spline_data = jnp.zeros((dimension, num_intervals * num_ppi + 1))
-    else:
-        spline_data = jnp.zeros(num_intervals * num_ppi + 1)
+    spline_data = jnp.zeros((2, num_intervals * num_ppi + 1))
 
     for i in range(num_intervals):
-        if dimension > 1:
-            P = control_points[:, i : i + order + 1]
-        else:
-            P = control_points[i : i + order + 1]
+        P = control_points[:, i : i + order + 1]
 
         spline_data_over_interval = jnp.dot(jnp.dot(P, M), L)
 
-        if dimension > 1:
-            if i == num_intervals - 1:
-                spline_data = spline_data.at[
-                    :, i * num_ppi : (i + 1) * num_ppi + 1
-                ].set(spline_data_over_interval[:, : num_ppi + 1])
-            else:
-                spline_data = spline_data.at[:, i * num_ppi : (i + 1) * num_ppi].set(
-                    spline_data_over_interval[:, :num_ppi]
-                )
+        if i == num_intervals - 1:
+            # Set the last interval's data including the endpoint
+            spline_data = spline_data.at[:, i * num_ppi : (i + 1) * num_ppi + 1].set(
+                spline_data_over_interval[:, : num_ppi + 1]
+            )
         else:
-            if i == num_intervals - 1:
-                spline_data = spline_data.at[i * num_ppi : (i + 1) * num_ppi + 1].set(
-                    spline_data_over_interval[: num_ppi + 1]
-                )
-            else:
-                spline_data = spline_data.at[i * num_ppi : (i + 1) * num_ppi].set(
-                    spline_data_over_interval[:num_ppi]
-                )
+            # Set the current interval's data
+            spline_data = spline_data.at[:, i * num_ppi : (i + 1) * num_ppi].set(
+                spline_data_over_interval[:, :num_ppi]
+            )
 
-    spline_data = jnp.hstack(
-        (spline_data[0, :].reshape((-1, 1)), spline_data[1, :].reshape((-1, 1)))
-    )
+    # Transpose to have shape (num_points, 2)
+    spline_data = spline_data.T
 
     return spline_data
 
@@ -226,7 +219,7 @@ def matrix_bspline_derivative_evaluation_for_dataset(
     steps_array = jnp.linspace(0, 1, num_ppi + 1)
     L_r = jnp.zeros((order + 1, num_ppi + 1))
     # Find M matrix
-    M = get_M_matrix(0, order, [], False)
+    M = get_M_matrix(0, order, [])
     K = __create_k_matrix(order, derivative_order, scale_factor)
     for i in range(order - derivative_order + 1):
         L_r = L_r.at[i, :].set(steps_array ** (order - derivative_order - i))
@@ -342,51 +335,28 @@ def __create_k_matrix(order, derivative_order, scale_factor):
 #     return K
 
 
-def get_M_matrix(initial_control_point_index, order, knot_points, clamped):
+def get_M_matrix(initial_control_point_index, order, knot_points):
     if order == 0:
         return 1
     if order == 1:
         M = __get_1_order_matrix()
-    elif clamped:
-        if order > 5:
-            print(
-                "Error: Cannot compute higher than 5th order matrix evaluation for clamped spline"
-            )
-            return None
-        elif order == 2:
-            M = __get_clamped_2_order_matrix(
-                initial_control_point_index, order, knot_points
-            )
-        elif order == 3:
-            M = __get_clamped_3_order_matrix(
-                initial_control_point_index, order, knot_points
-            )
-        elif order == 4:
-            M = __get_clamped_4_order_matrix(
-                initial_control_point_index, order, knot_points
-            )
-        elif order == 5:
-            M = __get_clamped_5_order_matrix(
-                initial_control_point_index, order, knot_points
-            )
-    else:
-        if order > 7:
-            print(
-                "Error: Cannot compute higher than 7th order matrix evaluation for open spline"
-            )
-            return None
-        elif order == 2:
-            M = __get_2_order_matrix()
-        elif order == 3:
-            M = __get_3_order_matrix()
-        elif order == 4:
-            M = __get_4_order_matrix()
-        elif order == 5:
-            M = __get_5_order_matrix()
-        elif order == 6:
-            M = __get_6_order_matrix()
-        elif order == 7:
-            M = __get_7_order_matrix()
+    if order > 7:
+        print(
+            "Error: Cannot compute higher than 7th order matrix evaluation for open spline"
+        )
+        return None
+    elif order == 2:
+        M = __get_2_order_matrix()
+    elif order == 3:
+        M = __get_3_order_matrix()
+    elif order == 4:
+        M = __get_4_order_matrix()
+    elif order == 5:
+        M = __get_5_order_matrix()
+    elif order == 6:
+        M = __get_6_order_matrix()
+    elif order == 7:
+        M = __get_7_order_matrix()
     return M
 
 

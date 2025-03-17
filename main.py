@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import time
 
 
 import path_planner
@@ -8,12 +9,12 @@ import routing_strategy
 
 def main():
     domain = (0, 100, 0, 100)
-    num_original = 10
+    num_original = 3
     num_vehicles = 1
-    max_distance = 1000
+    max_distance = 500
 
     original_nodes = routing_strategy.generate_random_nodes(
-        domain, total_nodes=num_original, seed=2
+        domain, total_nodes=num_original, seed=12
     )
     edges, path_budget, cellXYList = routing_strategy.find_edges_budget_and_cells(
         original_nodes, domain, max_distance
@@ -45,18 +46,21 @@ def main():
     # print("Total strait line distance", totalStraitLineDistance)
     #
 
+    splines = []
     for i in range(len(edges)):
         edge = edges[i]
 
-        nextVelocity = edges[i + 1][1] - edges[i + 1][0]
-        nextVelocity = nextVelocity / np.linalg.norm(nextVelocity) * agentSpeed
-        print("strait line distance", np.linalg.norm(edge[1] - edge[0]))
+        if i == len(edges) - 1:
+            nextVelocity = initialVelocity
+        else:
+            nextVelocity = edges[i + 1][1] - edges[i + 1][0]
+            nextVelocity = nextVelocity / np.linalg.norm(nextVelocity) * agentSpeed
+
+        straitLineDistance = np.linalg.norm(edge[1] - edge[0])
+        print("strait line distance", straitLineDistance)
         print("path budget", path_budget[i])
-        print("grid points", cellXYList[i].shape)
-        print("starting location", edge[0])
-        print("ending location", edge[1])
-        print("initial velocity", initialVelocity)
-        print("next velocity", nextVelocity)
+
+        start = time.time()
 
         spline = path_planner.optimize_spline_path(
             startingLocation=edge[0],
@@ -73,14 +77,23 @@ def main():
             gridPoints=cellXYList[i],
             splineSampledt=splineSampledt,
         )
+        print("time to optimize spline", time.time() - start)
         initialVelocity = nextVelocity
-        fig, ax = plt.subplots()
-        # plot_hazard_prob(knownHazards, gridPoints, fig, ax)
+        splines.append(spline)
+
+    fig, ax = plt.subplots()
+    # plot_hazard_prob(knownHazards, gridPoints, fig, ax)
+    for i, spline in enumerate(splines):
         path_planner.plot_spline(
-            spline, original_nodes, cellXYList[i], splineSampledt, fig, ax
+            spline,
+            original_nodes,
+            cellXYList[i],
+            splineSampledt,
+            fig,
+            ax,
+            plotColorbar=False,
         )
-        plt.show()
-        print(edge)
+    plt.show()
 
 
 if __name__ == "__main__":
