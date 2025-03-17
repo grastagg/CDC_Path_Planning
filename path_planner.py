@@ -859,7 +859,7 @@ def optimize_spline_path(
     optProb.addObj("obj", scale=1.0)
 
     opt = OPT("ipopt")
-    opt.options["print_level"] = 0
+    opt.options["print_level"] = 5
     opt.options["max_iter"] = 1000
     opt.options["tol"] = 1e-4
     username = getpass.getuser()
@@ -890,7 +890,7 @@ def main():
     startingLocation = np.array([0.0, 0.0])
 
     # endingLocation = np.array([2.59262, 52.9140])
-    endingLocation = np.array([22.59262, 52.9140])
+    endingLocation = np.array([5, 9])
     initialVelocity = endingLocation - startingLocation
     agentSpeed = 1.0
     initialVelocity = initialVelocity / np.linalg.norm(initialVelocity) * agentSpeed
@@ -903,6 +903,8 @@ def main():
     curvature_constraints = (-10.0, 10.0)
     boundsX = (-1, 10)
     boundsY = (-1, 6)
+
+    splineSampledt = 0.5
 
     pathLengthConstraint = 2.0 * np.linalg.norm(endingLocation - startingLocation)
 
@@ -931,6 +933,7 @@ def main():
         pathLengthConstraint,
         knownHazards,
         gridPoints,
+        splineSampledt,
     )
     start = time.time()
     spline = optimize_spline_path(
@@ -946,12 +949,13 @@ def main():
         pathLengthConstraint,
         knownHazards,
         gridPoints,
+        splineSampledt,
     )
     print("Time to optimize spline", time.time() - start)
 
     fig, ax = plt.subplots()
     # plot_hazard_prob(knownHazards, gridPoints, fig, ax)
-    plot_spline(spline, knownHazards, gridPoints, fig, ax)
+    plot_spline(spline, knownHazards, gridPoints, splineSampledt, fig, ax, True)
     plt.show()
 
 
