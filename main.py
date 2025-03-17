@@ -9,12 +9,11 @@ import routing_strategy
 
 def main():
     domain = (0, 100, 0, 100)
-    num_original = 3
-    num_vehicles = 1
-    max_distance = 500
+    num_original = 10
+    max_distance = 1000
 
     original_nodes = routing_strategy.generate_random_nodes(
-        domain, total_nodes=num_original, seed=12
+        domain, total_nodes=num_original, seed=2
     )
     edges, path_budget, cellXYList = routing_strategy.find_edges_budget_and_cells(
         original_nodes, domain, max_distance
