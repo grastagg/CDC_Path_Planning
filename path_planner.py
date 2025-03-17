@@ -24,16 +24,6 @@ jax.config.update("jax_enable_x64", True)
 matplotlib.rcParams["pdf.fonttype"] = 42
 matplotlib.rcParams["ps.fonttype"] = 42
 
-from bspline.matrix_evaluation import (
-    matrix_bspline_evaluation_for_dataset,
-    matrix_bspline_derivative_evaluation_for_dataset,
-)
-
-# jax.config.update("jax_disable_jit", True)
-
-numSamplesPerInterval = 5
-numSamplesPerIntervalObj = 30
-
 
 # def plot_spline(spline, pursuerPosition, pursuerRange, pursuerCaptureRange,pez_limit,useProbabalistic):
 def plot_spline(

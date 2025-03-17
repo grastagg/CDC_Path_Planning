@@ -1,0 +1,3 @@
+[submodule "jax_b_splines"]
+	path = jax_b_splines
+	url = git@github.com:grastagg/jax_b_splines.git
