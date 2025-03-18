@@ -32,7 +32,9 @@ from bspline.matrix_evaluation import (
 # jax.config.update("jax_disable_jit", True)
 
 numSamplesPerInterval = 5
-numSamplesPerIntervalObj = 30
+# numSamplesPerIntervalObj = 30
+
+steepness = 0.1
 
 
 # def plot_spline(spline, pursuerPosition, pursuerRange, pursuerCaptureRange,pez_limit,useProbabalistic):
@@ -57,6 +59,7 @@ def plot_spline(
     dt = knotPoints[3] - knotPoints[0]
     numSamples = (dt / splineSampledt).astype(int).item()
     posObjFunc = evaluate_spline(spline.c, spline.t, numSamples)
+
     Z = batch_hazard_probs(gridPoints, posObjFunc, knownHazards)
 
     # z_size = int(np.sqrt(Z.shape[0]))
@@ -77,6 +80,7 @@ def plot_spline(
     ax.scatter(
         knownHazards[:, 0], knownHazards[:, 1], c="r", marker="x", label="Hazard"
     )
+    ax.scatter(posObjFunc[:, 0], posObjFunc[:, 1], c="g", marker="o", label="Search")
     # ax.scatter(pos[0, 0], pos[0, 1], c="g", marker="o", label="Start Node")
     # ax.scatter(pos[-1, 0], pos[-1, 1], c="b", marker="o", label="End Node")
 
@@ -119,8 +123,8 @@ safe_norm_vectorized = jax.jit(jax.vmap(safe_norm, in_axes=(None, 0)))
 def prior_hazard_distirbution(x, hazardLocations):
     # If there is prior knowledge of where hazards are located include it as a probability distribution here
     baseProir = 0.0
-    maxProir = 0.9
-    decayRate = 0.05
+    maxProir = 1.0
+    decayRate = 0.015
     # dists = jnp.linalg.norm(hazardLocations - x, axis=1)
     dists = safe_norm_vectorized(x, hazardLocations)
 
@@ -132,6 +136,9 @@ def prior_hazard_distirbution(x, hazardLocations):
 
     # return combinedHazardProbs
     return prior
+
+
+prior_hazard_prob_vec = jax.jit(jax.vmap(prior_hazard_distirbution, in_axes=(0, None)))
 
 
 @jax.jit
@@ -154,7 +161,8 @@ def hazard_posterior_prob(x, searched_points, knownHazards):
         Posterior probability (0-1) of hazard existing at x
     """
 
-    steepness = 2.0
+    global steepness
+    steepness = steepness
     false_alarm = 0.0
     prior = prior_hazard_distirbution(x, knownHazards)
 
@@ -633,8 +641,14 @@ def create_initial_spline(
     tf = 1.0
     knotPoints = create_unclamped_knot_points(0, tf, numControlPoints, splineOrder)
 
+    sensingRadius = -np.log(0.1) / steepness
+    print("Sensing Radius: ", sensingRadius)
     x0 = create_initial_lawnmower_path(
-        startingLocation, endingLocation, numControlPoints, pathBudget, 1.0
+        startingLocation,
+        endingLocation,
+        numControlPoints,
+        1.1 * pathBudget,
+        sensingRadius,
     ).flatten()
     # x0 = np.linspace(startingLocation, endingLocation, numControlPoints).flatten()
 
@@ -676,6 +690,7 @@ def optimize_spline_path(
     knownHazards,
     gridPoints,
     splineSampledt,
+    lawnMowerPath,
 ):
     def objfunc(xDict):
         tf = xDict["tf"]
@@ -858,9 +873,13 @@ def optimize_spline_path(
 
     optProb.addObj("obj", scale=1.0)
 
+    max_iter = 1000
+    if lawnMowerPath:
+        max_iter = 0
+
     opt = OPT("ipopt")
     opt.options["print_level"] = 5
-    opt.options["max_iter"] = 1000
+    opt.options["max_iter"] = max_iter
     opt.options["tol"] = 1e-4
     username = getpass.getuser()
     opt.options["hsllib"] = (
@@ -872,6 +891,7 @@ def optimize_spline_path(
 
     sol = opt(optProb, sens=sens)
     print("Objective value", sol.fStar)
+    print(sol)
 
     if sol.optInform["value"] != 0:
         print("Optimization failed")
