@@ -645,14 +645,14 @@ def create_initial_spline(
     knotPoints = create_unclamped_knot_points(0, tf, numControlPoints, splineOrder)
 
     sensingRadius = -np.log(0.1) / steepness
-    x0 = create_initial_lawnmower_path(
-        startingLocation,
-        endingLocation,
-        numControlPoints,
-        1.0 * pathBudget,
-        sensingRadius,
-    ).flatten()
-    # x0 = np.linspace(startingLocation, endingLocation, numControlPoints).flatten()
+    # x0 = create_initial_lawnmower_path(
+    #     startingLocation,
+    #     endingLocation,
+    #     numControlPoints,
+    #     1.0 * pathBudget,
+    #     sensingRadius,
+    # ).flatten()
+    x0 = np.linspace(startingLocation, endingLocation, numControlPoints).flatten()
 
     tf = np.linalg.norm(x0[0] - x0[-1]) / velocityConstraints[1]
     tf = assure_velocity_constraint(x0, velocityConstraints, tf)

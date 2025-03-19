@@ -177,42 +177,42 @@ def run_test(index):
             splineSampledt=splineSampledt,
             lawnMowerPath=True,
         )
-        start = time.time()
-        spline = path_planner.optimize_spline_path(
-            startingLocation=edge[0],
-            endingLocation=edge[1],
-            initialVelocity=initialVelocity,
-            finalVelocity=nextVelocity,
-            numControlPoints=numControlPoints,
-            splineOrder=splineOrder,
-            velocityConstraints=velocityConstraints,
-            turnrateConstraints=turn_rate_constraints,
-            curvatureConstraints=curvature_constraints,
-            pathLengthConstraint=budgets[i],
-            knownHazards=original_nodes,
-            gridPoints=cellXYList[i],
-            splineSampledt=splineSampledt,
-            lawnMowerPath=False,
-        )
-        print("time to optimize spline", time.time() - start)
+        # start = time.time()
+        # spline = path_planner.optimize_spline_path(
+        #     startingLocation=edge[0],
+        #     endingLocation=edge[1],
+        #     initialVelocity=initialVelocity,
+        #     finalVelocity=nextVelocity,
+        #     numControlPoints=numControlPoints,
+        #     splineOrder=splineOrder,
+        #     velocityConstraints=velocityConstraints,
+        #     turnrateConstraints=turn_rate_constraints,
+        #     curvatureConstraints=curvature_constraints,
+        #     pathLengthConstraint=budgets[i],
+        #     knownHazards=original_nodes,
+        #     gridPoints=cellXYList[i],
+        #     splineSampledt=splineSampledt,
+        #     lawnMowerPath=False,
+        # )
+        # print("time to optimize spline", time.time() - start)
         lawnMowerSPlines.append(lm_spline)
-        splines.append(spline)
+        # splines.append(spline)
         initialVelocity = nextVelocity
 
-    percent_found, node_found = evaluate_path(splines, hidden_nodes, splineSampledt)
+    # percent_found, node_found = evaluate_path(splines, hidden_nodes, splineSampledt)
     percent_found_lm, node_found_lm = evaluate_path(
         lawnMowerSPlines, hidden_nodes, splineSampledt
     )
-    print("optimized percent found", percent_found)
+    # print("optimized percent found", percent_found)
     print("lawn mower percent found", percent_found_lm)
 
-    lawnMowerFileName = "lawn_mower.txt"
+    lawnMowerFileName = "strait_line.txt"
     optimizedFileName = "optimized.txt"
     if True:
         with open(lawnMowerFileName, "a") as f:
             f.write(f"{percent_found_lm}\n")
-        with open(optimizedFileName, "a") as f:
-            f.write(f"{percent_found}\n")
+        # with open(optimizedFileName, "a") as f:
+        #     f.write(f"{percent_found}\n")
 
     # plot_combined_paths(
     #     splines, original_nodes, splineSampledt, hidden_nodes, node_found, domain
@@ -228,11 +228,11 @@ def run_all():
 def compare_data():
     opdata = np.genfromtxt("optimized.txt")
     lmdata = np.genfromtxt("lawn_mower.txt")
-    # strait_line = np.genfromtxt("strait_line.txt")
+    strait_line = np.genfromtxt("strait_line.txt")
 
     print("mean optimized", np.mean(opdata))
     print("mean lawn mower", np.mean(lmdata))
-    # print("mean strait line", np.mean(strait_line))
+    print("mean strait line", np.mean(strait_line))
 
 
 if __name__ == "__main__":
