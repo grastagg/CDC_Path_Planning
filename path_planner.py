@@ -19,6 +19,8 @@ np.random.seed(12341)
 
 
 jax.config.update("jax_enable_x64", True)
+# use cpu instead of gpu
+jax.config.update("jax_platform_name", "gpu")
 
 
 matplotlib.rcParams["pdf.fonttype"] = 42
@@ -125,6 +127,7 @@ def prior_hazard_distirbution(x, hazardLocations):
     baseProir = 0.0
     maxProir = 1.0
     decayRate = 0.015
+    # decayRate = 0.012
     # dists = jnp.linalg.norm(hazardLocations - x, axis=1)
     dists = safe_norm_vectorized(x, hazardLocations)
 
@@ -642,12 +645,11 @@ def create_initial_spline(
     knotPoints = create_unclamped_knot_points(0, tf, numControlPoints, splineOrder)
 
     sensingRadius = -np.log(0.1) / steepness
-    print("Sensing Radius: ", sensingRadius)
     x0 = create_initial_lawnmower_path(
         startingLocation,
         endingLocation,
         numControlPoints,
-        1.1 * pathBudget,
+        1.0 * pathBudget,
         sensingRadius,
     ).flatten()
     # x0 = np.linspace(startingLocation, endingLocation, numControlPoints).flatten()
@@ -707,9 +709,9 @@ def optimize_spline_path(
             controlPoints, knotPoints, splineOrder
         )
 
-        dt = knotPoints[3] - knotPoints[0]
-        numSamples = (dt / splineSampledt).astype(int).item()
-        # numSamples = 10
+        # dt = knotPoints[3] - knotPoints[0]
+        # numSamples = (dt / splineSampledt).astype(int).item()
+        numSamples = 25
         obj = objective_funtion(
             controlPoints.flatten(),
             tf,

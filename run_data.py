@@ -104,7 +104,7 @@ def evaluate_path(splines, hidden_nodes, splineSampledt):
     return np.sum(node_found) / len(hidden_nodes), node_found
 
 
-def run_test():
+def run_test(index):
     domain = (0, 1000, 0, 1000)
     with open("original_10_virtual_3.json") as f:
         data = json.load(f)[0]
@@ -116,7 +116,7 @@ def run_test():
         virtual_nodes = np.array(data["edge_virtual_nodes"])
         combinded_nodes = np.vstack([original_nodes, virtual_nodes])
 
-        plot_known_and_hidden_nodes(original_nodes, hidden_nodes, domain)
+        # plot_known_and_hidden_nodes(original_nodes, hidden_nodes, domain)
 
         route = data["routes_cvt"]
         edges = []
@@ -132,8 +132,6 @@ def run_test():
                 end = combinded_nodes[route[i + 1] - 1]
             edges.append((start, end))
 
-    plot_route(edges)
-
     # path planning parameters
     agentSpeed = 8.0
     initialVelocity = edges[0][1] - edges[0][0]
@@ -147,13 +145,14 @@ def run_test():
     curvature_constraints = (-10.0, 10.0)
 
     edge_vor, cellPoints = routing_strategy.approximate_edge_voronoi(
-        edges, domain, grid_size=50
+        edges, domain, grid_size=100
     )
     cellXYList = [cellPoints[edge_vor == i] for i in range(len(edges))]
 
     splines = []
     lawnMowerSPlines = []
     for i in range(len(edges)):
+        # for i in range(1):
         edge = edges[i]
 
         if i == len(edges) - 1:
@@ -162,6 +161,22 @@ def run_test():
             nextVelocity = edges[i + 1][1] - edges[i + 1][0]
             nextVelocity = nextVelocity / np.linalg.norm(nextVelocity) * agentSpeed
 
+        lm_spline = path_planner.optimize_spline_path(
+            startingLocation=edge[0],
+            endingLocation=edge[1],
+            initialVelocity=initialVelocity,
+            finalVelocity=nextVelocity,
+            numControlPoints=numControlPoints,
+            splineOrder=splineOrder,
+            velocityConstraints=velocityConstraints,
+            turnrateConstraints=turn_rate_constraints,
+            curvatureConstraints=curvature_constraints,
+            pathLengthConstraint=budgets[i],
+            knownHazards=original_nodes,
+            gridPoints=cellXYList[i],
+            splineSampledt=splineSampledt,
+            lawnMowerPath=True,
+        )
         start = time.time()
         spline = path_planner.optimize_spline_path(
             startingLocation=edge[0],
@@ -179,38 +194,10 @@ def run_test():
             splineSampledt=splineSampledt,
             lawnMowerPath=False,
         )
-        lm_spline = path_planner.optimize_spline_path(
-            startingLocation=edge[0],
-            endingLocation=edge[1],
-            initialVelocity=initialVelocity,
-            finalVelocity=nextVelocity,
-            numControlPoints=numControlPoints,
-            splineOrder=splineOrder,
-            velocityConstraints=velocityConstraints,
-            turnrateConstraints=turn_rate_constraints,
-            curvatureConstraints=curvature_constraints,
-            pathLengthConstraint=budgets[i],
-            knownHazards=original_nodes,
-            gridPoints=cellXYList[i],
-            splineSampledt=splineSampledt,
-            lawnMowerPath=True,
-        )
-        lawnMowerSPlines.append(lm_spline)
-
-        # fig, ax = plt.subplots()
-        # path_planner.plot_spline(
-        #     spline,
-        #     original_nodes,
-        #     cellXYList[i],
-        #     splineSampledt,
-        #     fig,
-        #     ax,
-        #     plotColorbar=False,
-        # )
-        # plt.show()
         print("time to optimize spline", time.time() - start)
-        initialVelocity = nextVelocity
+        lawnMowerSPlines.append(lm_spline)
         splines.append(spline)
+        initialVelocity = nextVelocity
 
     percent_found, node_found = evaluate_path(splines, hidden_nodes, splineSampledt)
     percent_found_lm, node_found_lm = evaluate_path(
@@ -218,11 +205,37 @@ def run_test():
     )
     print("optimized percent found", percent_found)
     print("lawn mower percent found", percent_found_lm)
-    plot_combined_paths(
-        splines, original_nodes, splineSampledt, hidden_nodes, node_found, domain
-    )
-    plt.show()
+
+    lawnMowerFileName = "lawn_mower.txt"
+    optimizedFileName = "optimized.txt"
+    if True:
+        with open(lawnMowerFileName, "a") as f:
+            f.write(f"{percent_found_lm}\n")
+        with open(optimizedFileName, "a") as f:
+            f.write(f"{percent_found}\n")
+
+    # plot_combined_paths(
+    #     splines, original_nodes, splineSampledt, hidden_nodes, node_found, domain
+    # )
+    # plt.show()
+
+
+def run_all():
+    for i in range(100):
+        run_test(i)
+
+
+def compare_data():
+    opdata = np.genfromtxt("optimized.txt")
+    lmdata = np.genfromtxt("lawn_mower.txt")
+    # strait_line = np.genfromtxt("strait_line.txt")
+
+    print("mean optimized", np.mean(opdata))
+    print("mean lawn mower", np.mean(lmdata))
+    # print("mean strait line", np.mean(strait_line))
 
 
 if __name__ == "__main__":
-    run_test()
+    # run_test(0)
+    # run_all()
+    compare_data()
