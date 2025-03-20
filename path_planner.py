@@ -641,6 +641,7 @@ def create_initial_spline(
     velocityConstraints,
     pathBudget,
     straightLine,
+    lawnMowerPath,
 ):
     tf = 1.0
     knotPoints = create_unclamped_knot_points(0, tf, numControlPoints, splineOrder)
@@ -648,13 +649,22 @@ def create_initial_spline(
     if straightLine:
         x0 = np.linspace(startingLocation, endingLocation, numControlPoints).flatten()
 
-    else:
+    elif lawnMowerPath:
         sensingRadius = -np.log(0.1) / steepness
         x0 = create_initial_lawnmower_path(
             startingLocation,
             endingLocation,
             numControlPoints,
             1.0 * pathBudget,
+            sensingRadius,
+        ).flatten()
+    else:
+        sensingRadius = -np.log(0.1) / steepness
+        x0 = create_initial_lawnmower_path(
+            startingLocation,
+            endingLocation,
+            numControlPoints,
+            2.0 * pathBudget,
             sensingRadius,
         ).flatten()
 
@@ -831,6 +841,7 @@ def optimize_spline_path(
         velocityConstraints,
         pathLengthConstraint,
         straightLine,
+        lawnMowerPath,
     )
 
     # get size of constraints
@@ -872,7 +883,9 @@ def optimize_spline_path(
     )
     optProb.addConGroup("start", 2, lower=startingLocation, upper=startingLocation)
     optProb.addConGroup("end", 2, lower=endingLocation, upper=endingLocation)
-    optProb.addConGroup("path_length", 1, lower=0, upper=pathLengthConstraint)
+    optProb.addConGroup(
+        "path_length", 1, lower=0.9 * pathLengthConstraint, upper=pathLengthConstraint
+    )
     optProb.addConGroup("final_velocity", 2, lower=finalVelocity, upper=finalVelocity)
     optProb.addConGroup(
         "initial_velocity", 2, lower=initialVelocity, upper=initialVelocity
@@ -898,7 +911,8 @@ def optimize_spline_path(
 
     sol = opt(optProb, sens=sens)
     # print("Objective value", sol.fStar)
-    # print(sol)
+    if not lawnMowerPath and not straightLine:
+        print(sol)
 
     if sol.optInform["value"] != 0:
         print("Optimization failed")
