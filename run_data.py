@@ -2,6 +2,7 @@ import numpy as np
 import json
 import matplotlib.pyplot as plt
 import time
+import os
 
 
 import path_planner
@@ -104,9 +105,10 @@ def evaluate_path(splines, hidden_nodes, splineSampledt):
     return np.sum(node_found) / len(hidden_nodes), node_found
 
 
-def run_test(index):
+def run_test(index, filename):
     domain = (0, 1000, 0, 1000)
-    with open("original_10_virtual_3.json") as f:
+    # filename = "original_5_virtual_1"
+    with open("data/" + filename + ".json") as f:
         data = json.load(f)[0]
         original_nodes = np.array(data["original_nodes"])
         print("original nodes", original_nodes)
@@ -116,7 +118,7 @@ def run_test(index):
         virtual_nodes = np.array(data["edge_virtual_nodes"])
         combinded_nodes = np.vstack([original_nodes, virtual_nodes])
 
-        # plot_known_and_hidden_nodes(original_nodes, hidden_nodes, domain)
+        plot_known_and_hidden_nodes(original_nodes, hidden_nodes, domain)
 
         route = data["routes_cvt"]
         edges = []
@@ -151,6 +153,7 @@ def run_test(index):
 
     splines = []
     lawnMowerSPlines = []
+    straitSplines = []
     for i in range(len(edges)):
         # for i in range(1):
         edge = edges[i]
@@ -176,59 +179,100 @@ def run_test(index):
             gridPoints=cellXYList[i],
             splineSampledt=splineSampledt,
             lawnMowerPath=True,
+            straightLine=False,
         )
-        # start = time.time()
-        # spline = path_planner.optimize_spline_path(
-        #     startingLocation=edge[0],
-        #     endingLocation=edge[1],
-        #     initialVelocity=initialVelocity,
-        #     finalVelocity=nextVelocity,
-        #     numControlPoints=numControlPoints,
-        #     splineOrder=splineOrder,
-        #     velocityConstraints=velocityConstraints,
-        #     turnrateConstraints=turn_rate_constraints,
-        #     curvatureConstraints=curvature_constraints,
-        #     pathLengthConstraint=budgets[i],
-        #     knownHazards=original_nodes,
-        #     gridPoints=cellXYList[i],
-        #     splineSampledt=splineSampledt,
-        #     lawnMowerPath=False,
-        # )
-        # print("time to optimize spline", time.time() - start)
+        strait_spline = path_planner.optimize_spline_path(
+            startingLocation=edge[0],
+            endingLocation=edge[1],
+            initialVelocity=initialVelocity,
+            finalVelocity=nextVelocity,
+            numControlPoints=numControlPoints,
+            splineOrder=splineOrder,
+            velocityConstraints=velocityConstraints,
+            turnrateConstraints=turn_rate_constraints,
+            curvatureConstraints=curvature_constraints,
+            pathLengthConstraint=budgets[i],
+            knownHazards=original_nodes,
+            gridPoints=cellXYList[i],
+            splineSampledt=splineSampledt,
+            lawnMowerPath=False,
+            straightLine=True,
+        )
+        start = time.time()
+        spline = path_planner.optimize_spline_path(
+            startingLocation=edge[0],
+            endingLocation=edge[1],
+            initialVelocity=initialVelocity,
+            finalVelocity=nextVelocity,
+            numControlPoints=numControlPoints,
+            splineOrder=splineOrder,
+            velocityConstraints=velocityConstraints,
+            turnrateConstraints=turn_rate_constraints,
+            curvatureConstraints=curvature_constraints,
+            pathLengthConstraint=budgets[i],
+            knownHazards=original_nodes,
+            gridPoints=cellXYList[i],
+            splineSampledt=splineSampledt,
+            lawnMowerPath=False,
+            straightLine=False,
+        )
+        print("time to optimize spline", time.time() - start)
         lawnMowerSPlines.append(lm_spline)
-        # splines.append(spline)
+        splines.append(spline)
+        straitSplines.append(strait_spline)
         initialVelocity = nextVelocity
 
-    # percent_found, node_found = evaluate_path(splines, hidden_nodes, splineSampledt)
+    percent_found, node_found = evaluate_path(splines, hidden_nodes, splineSampledt)
     percent_found_lm, node_found_lm = evaluate_path(
         lawnMowerSPlines, hidden_nodes, splineSampledt
     )
-    # print("optimized percent found", percent_found)
+    percent_found_strait, node_found_strait = evaluate_path(
+        straitSplines, hidden_nodes, splineSampledt
+    )
+    print("optimized percent found", percent_found)
     print("lawn mower percent found", percent_found_lm)
+    print("strait line percent found", percent_found_strait)
 
-    lawnMowerFileName = "strait_line.txt"
+    lawnMowerFileName = "lawnmower.txt"
     optimizedFileName = "optimized.txt"
-    if True:
-        with open(lawnMowerFileName, "a") as f:
+    straitLineFileName = "strait_line.txt"
+
+    saveData = False
+    if saveData:
+        saveFolder = "processedData/"
+        if not os.path.exists(saveFolder + filename):
+            os.mkdir(saveFolder + filename)
+        with open(saveFolder + filename + "/" + lawnMowerFileName, "a") as f:
             f.write(f"{percent_found_lm}\n")
-        # with open(optimizedFileName, "a") as f:
-        #     f.write(f"{percent_found}\n")
+        with open(saveFolder + filename + "/" + optimizedFileName, "a") as f:
+            f.write(f"{percent_found}\n")
+        with open(saveFolder + filename + "/" + straitLineFileName, "a") as f:
+            f.write(f"{percent_found_strait}\n")
+    else:
+        plot_combined_paths(
+            splines, original_nodes, splineSampledt, hidden_nodes, node_found, domain
+        )
+        plt.show()
 
-    # plot_combined_paths(
-    #     splines, original_nodes, splineSampledt, hidden_nodes, node_found, domain
-    # )
-    # plt.show()
 
-
-def run_all():
+def run_all(filename):
     for i in range(100):
-        run_test(i)
+        run_test(i, filename)
 
 
-def compare_data():
-    opdata = np.genfromtxt("optimized.txt")
-    lmdata = np.genfromtxt("lawn_mower.txt")
-    strait_line = np.genfromtxt("strait_line.txt")
+def run_all_different_numbers():
+    folder_path = "data/"
+    for file in os.listdir(folder_path):
+        if file.endswith(".json"):
+            name_without_ext = os.path.splitext(file)[0]
+            print(name_without_ext)
+            run_all(name_without_ext)
+
+
+def compare_data(folder):
+    opdata = np.genfromtxt(folder + "optimized.txt")
+    lmdata = np.genfromtxt(folder + "lawnmower.txt")
+    strait_line = np.genfromtxt(folder + "strait_line.txt")
 
     print("mean optimized", np.mean(opdata))
     print("mean lawn mower", np.mean(lmdata))
@@ -236,6 +280,9 @@ def compare_data():
 
 
 if __name__ == "__main__":
-    # run_test(0)
-    # run_all()
-    compare_data()
+    run_test(1, "original_10_virtual_1")
+    #
+    # folder = "processedData/original_5_virtual_3/"
+    # compare_data(folder)
+    # run_all(folder)
+    # run_all_different_numbers()

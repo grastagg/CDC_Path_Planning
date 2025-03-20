@@ -640,19 +640,23 @@ def create_initial_spline(
     finalVelocity,
     velocityConstraints,
     pathBudget,
+    straightLine,
 ):
     tf = 1.0
     knotPoints = create_unclamped_knot_points(0, tf, numControlPoints, splineOrder)
 
-    sensingRadius = -np.log(0.1) / steepness
-    # x0 = create_initial_lawnmower_path(
-    #     startingLocation,
-    #     endingLocation,
-    #     numControlPoints,
-    #     1.0 * pathBudget,
-    #     sensingRadius,
-    # ).flatten()
-    x0 = np.linspace(startingLocation, endingLocation, numControlPoints).flatten()
+    if straightLine:
+        x0 = np.linspace(startingLocation, endingLocation, numControlPoints).flatten()
+
+    else:
+        sensingRadius = -np.log(0.1) / steepness
+        x0 = create_initial_lawnmower_path(
+            startingLocation,
+            endingLocation,
+            numControlPoints,
+            1.0 * pathBudget,
+            sensingRadius,
+        ).flatten()
 
     tf = np.linalg.norm(x0[0] - x0[-1]) / velocityConstraints[1]
     tf = assure_velocity_constraint(x0, velocityConstraints, tf)
@@ -693,6 +697,7 @@ def optimize_spline_path(
     gridPoints,
     splineSampledt,
     lawnMowerPath,
+    straightLine,
 ):
     def objfunc(xDict):
         tf = xDict["tf"]
@@ -825,8 +830,8 @@ def optimize_spline_path(
         finalVelocity,
         velocityConstraints,
         pathLengthConstraint,
+        straightLine,
     )
-    print("time to create initial spline", time.time() - start)
 
     # get size of constraints
     tempVelocityContstraints = get_spline_velocity(x0, 1, 3)
@@ -876,11 +881,11 @@ def optimize_spline_path(
     optProb.addObj("obj", scale=1.0)
 
     max_iter = 1000
-    if lawnMowerPath:
+    if lawnMowerPath or straightLine:
         max_iter = 0
 
     opt = OPT("ipopt")
-    opt.options["print_level"] = 5
+    opt.options["print_level"] = 0
     opt.options["max_iter"] = max_iter
     opt.options["tol"] = 1e-4
     username = getpass.getuser()
@@ -892,8 +897,8 @@ def optimize_spline_path(
     # opt.options["derivative_test"] = "first-order"
 
     sol = opt(optProb, sens=sens)
-    print("Objective value", sol.fStar)
-    print(sol)
+    # print("Objective value", sol.fStar)
+    # print(sol)
 
     if sol.optInform["value"] != 0:
         print("Optimization failed")
