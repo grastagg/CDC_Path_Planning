@@ -33,7 +33,7 @@ def plot_known_and_hidden_nodes(
     original_nodes, hidden_nodes, generatorHiddeNodos, domain
 ):
     fig, ax = plt.subplots()
-    numGrid = 1000
+    numGrid = 100
     gridX = np.linspace(domain[0], domain[1], numGrid)
     gridY = np.linspace(domain[2], domain[3], numGrid)
     [X, Y] = np.meshgrid(gridX, gridY)
@@ -79,14 +79,15 @@ def plot_combined_paths(
     # plot_hazard_prob(knownHazards, gridPoints, fig, ax)
     sampledPoints = sample_splines(splines, splineSampledt)
 
-    x = np.linspace(domain[0], domain[1], 1000)
-    y = np.linspace(domain[2], domain[3], 1000)
+    numGrid = 100
+    x = np.linspace(domain[0], domain[1], numGrid)
+    y = np.linspace(domain[2], domain[3], numGrid)
     [X, Y] = np.meshgrid(x, y)
     grid_locations = np.column_stack((X.ravel(), Y.ravel()))
     probs = path_planner.batch_hazard_probs(
         grid_locations, sampledPoints, original_nodes
     )
-    ax.pcolormesh(X, Y, probs.reshape(1000, 1000))
+    ax.pcolormesh(X, Y, probs.reshape(numGrid, numGrid), vmin=0, vmax=1)
     ax.scatter(sampledPoints[:, 0], sampledPoints[:, 1])
     ax.scatter(hidden_nodes[:, 0], hidden_nodes[:, 1], c=node_found, cmap="cool")
     ax.set_aspect("equal")
@@ -138,9 +139,9 @@ def run_test(index, filename):
         virtual_nodes = np.array(data["edge_virtual_nodes"])
         combinded_nodes = np.vstack([original_nodes, virtual_nodes])
 
-        # plot_known_and_hidden_nodes(
-        #     original_nodes, hidden_nodes, generatingHiddenNodes, domain
-        # )
+        plot_known_and_hidden_nodes(
+            original_nodes, hidden_nodes, generatingHiddenNodes, domain
+        )
 
         route = data["routes_cvt"]
         edges = []
@@ -294,7 +295,7 @@ def run_test(index, filename):
 
 
 def run_all(filename):
-    for i in range(100):
+    for i in range(10):
         print("trial ", i)
         run_test(i, filename)
 
@@ -367,12 +368,13 @@ def generate_plots(file):
 
 
 if __name__ == "__main__":
-    start = time.time()
+    # start = time.time()
     run_test(11, "original_5_virtual_1")
-    print("time to run test", time.time() - start)
+    # print("time to run test", time.time() - start)
     #
     # folder = "processedData/original_5_virtual_3/"
     # compare_data(folder)
+    # folder = "original_5_virtual_1"
     # run_all(folder)
     # run_all_different_numbers()
 
