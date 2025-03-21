@@ -132,7 +132,7 @@ def run_test(index, filename):
 
         hidden_nodes = sample_hidden_nodes(
             np.vstack([original_nodes, generatingHiddenNodes]),
-            num_hidden_nodes=300,
+            num_hidden_nodes=50,
             domain=domain,
         )
         virtual_nodes = np.array(data["edge_virtual_nodes"])
@@ -259,7 +259,7 @@ def run_test(index, filename):
     optimizedFileName = "optimized.txt"
     straitLineFileName = "strait_line.txt"
 
-    saveData = True
+    saveData = False
     if saveData:
         saveFolder = "processedData/"
         if not os.path.exists(saveFolder + filename):
@@ -295,6 +295,7 @@ def run_test(index, filename):
 
 def run_all(filename):
     for i in range(100):
+        print("trial ", i)
         run_test(i, filename)
 
 
@@ -316,6 +317,7 @@ def run_all_different_numbers():
     ]
 
     for file in json_files:
+        print("running file", file)
         run_all(file)
     # with concurrent.futures.ProcessPoolExecutor(max_workers=5) as executor:
     #     executor.map(run_all, json_files)
@@ -331,12 +333,47 @@ def compare_data(folder):
     print("mean strait line", np.mean(strait_line))
 
 
+def generate_plots(file):
+    file = "original_5"
+    virtual1opt = np.genfromtxt(f"processedData/{file}_virtual_1/optimized.txt")
+    virtual1lm = np.genfromtxt(f"processedData/{file}_virtual_1/lawnmower.txt")
+    virtual1strait = np.genfromtxt(f"processedData/{file}_virtual_1/strait_line.txt")
+    virtual3opt = np.genfromtxt(f"processedData/{file}_virtual_3/optimized.txt")
+    virtual3lm = np.genfromtxt(f"processedData/{file}_virtual_3/lawnmower.txt")
+    virtual3strait = np.genfromtxt(f"processedData/{file}_virtual_3/strait_line.txt")
+
+    virtual2opt = np.genfromtxt(f"processedData/{file}_virtual_2/optimized.txt")
+    virtual2lm = np.genfromtxt(f"processedData/{file}_virtual_2/lawnmower.txt")
+    virtual2strait = np.genfromtxt(f"processedData/{file}_virtual_2/strait_line.txt")
+
+    fig, ax = plt.subplots()
+    ax.scatter(
+        range(3),
+        [np.mean(virtual1opt), np.mean(virtual2opt), np.mean(virtual3opt)],
+        label="Optimized",
+    )
+    ax.scatter(
+        range(3),
+        [np.mean(virtual1lm), np.mean(virtual2lm), np.mean(virtual3lm)],
+        label="Lawn Mower",
+    )
+    ax.scatter(
+        range(3),
+        [np.mean(virtual1strait), np.mean(virtual2strait), np.mean(virtual3strait)],
+        label="Strait Line",
+    )
+
+    plt.show()
+
+
 if __name__ == "__main__":
-    # start = time.time()
-    # run_test(1, "original_5_virtual_3")
-    # print("time to run test", time.time() - start)
+    start = time.time()
+    run_test(11, "original_5_virtual_1")
+    print("time to run test", time.time() - start)
     #
     # folder = "processedData/original_5_virtual_3/"
     # compare_data(folder)
     # run_all(folder)
-    run_all_different_numbers()
+    # run_all_different_numbers()
+
+    # generate_plots("original_10")

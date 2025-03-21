@@ -595,9 +595,7 @@ def upsample_to_min_length(points, min_length=25):
 
 def fit_spline_to_path(path, num_control_points, splineOrder, startPoint, endPoint):
     if len(path) < 25:
-        print("path",path)
         path = upsample_to_min_length(path,30)
-        print("path",path)
     tf = 1
     t = np.linspace(0, tf, len(path))
 
@@ -635,8 +633,11 @@ def create_initial_lawnmower_path(
     path = generate_lawnmower_path(
         startingLocation, endingLocation, pathBudget, 2 * sensingRadius
     )
+    if len(path) == 0:
+        path = np.vstack([startingLocation,endingLocation])
+    else:
+        path = np.vstack([startingLocation,path,endingLocation])
     path = sample_path(path, 0.05)
-    path = np.vstack([startingLocation,path,endingLocation])
     splineControlPoints, splineKnotPoints = fit_spline_to_path(
         path, numControlPoints, 3, startingLocation, endingLocation
     )
