@@ -33,7 +33,7 @@ from bspline.matrix_evaluation import (
 
 # jax.config.update("jax_disable_jit", True)
 
-numSamplesPerInterval = 5
+numSamplesPerInterval = 2
 # numSamplesPerIntervalObj = 30
 
 steepness = 0.1
@@ -124,7 +124,7 @@ safe_norm_vectorized = jax.jit(jax.vmap(safe_norm, in_axes=(None, 0)))
 @jax.jit
 def prior_hazard_distirbution(x, hazardLocations):
     # If there is prior knowledge of where hazards are located include it as a probability distribution here
-    baseProir = 0.0
+    baseProir = 0.1
     maxProir = 1.0
     decayRate = 0.015
     # decayRate = 0.012
@@ -132,10 +132,11 @@ def prior_hazard_distirbution(x, hazardLocations):
     dists = safe_norm_vectorized(x, hazardLocations)
 
     singleHazardProbs = jnp.exp(-decayRate * dists)
-    combinedHazardProbs = 1 - jnp.prod(1 - singleHazardProbs)
+    combinedHazardProbs = 1 - (jnp.prod(1 - singleHazardProbs) * (1 - baseProir))
 
     # scale appropriately
-    prior = baseProir + (maxProir - baseProir) * combinedHazardProbs
+    # prior = baseProir + (maxProir - baseProir) * combinedHazardProbs
+    prior = combinedHazardProbs
 
     # return combinedHazardProbs
     return prior
@@ -574,8 +575,29 @@ def sample_path(path, interval):
 
     return np.array(sampled_points)
 
+def upsample_to_min_length(points, min_length=25):
+    n = len(points)
+    if n >= min_length:
+        return points
+
+    # Compute cumulative distances along the path
+    dists = np.sqrt(np.sum(np.diff(points, axis=0)**2, axis=1))
+    cum_dists = np.insert(np.cumsum(dists), 0, 0)
+    
+    # New target distances
+    new_dists = np.linspace(0, cum_dists[-1], min_length)
+
+    # Interpolate x and y separately
+    x_interp = np.interp(new_dists, cum_dists, points[:, 0])
+    y_interp = np.interp(new_dists, cum_dists, points[:, 1])
+    
+    return np.column_stack((x_interp, y_interp))
 
 def fit_spline_to_path(path, num_control_points, splineOrder, startPoint, endPoint):
+    if len(path) < 25:
+        print("path",path)
+        path = upsample_to_min_length(path,30)
+        print("path",path)
     tf = 1
     t = np.linspace(0, tf, len(path))
 
@@ -614,6 +636,7 @@ def create_initial_lawnmower_path(
         startingLocation, endingLocation, pathBudget, 2 * sensingRadius
     )
     path = sample_path(path, 0.05)
+    path = np.vstack([startingLocation,path,endingLocation])
     splineControlPoints, splineKnotPoints = fit_spline_to_path(
         path, numControlPoints, 3, startingLocation, endingLocation
     )
@@ -911,8 +934,8 @@ def optimize_spline_path(
 
     sol = opt(optProb, sens=sens)
     # print("Objective value", sol.fStar)
-    if not lawnMowerPath and not straightLine:
-        print(sol)
+    # if not lawnMowerPath and not straightLine:
+    #     print(sol)
 
     if sol.optInform["value"] != 0:
         print("Optimization failed")
