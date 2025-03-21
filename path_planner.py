@@ -685,7 +685,7 @@ def create_initial_spline(
             sensingRadius,
         ).flatten()
     else:
-        sensingRadius = -np.log(0.1) / steepness
+        sensingRadius = np.sqrt(-np.log(0.1) / steepness)
         x0 = create_initial_lawnmower_path(
             startingLocation,
             endingLocation,
@@ -869,6 +869,10 @@ def optimize_spline_path(
         straightLine,
         lawnMowerPath,
     )
+    if lawnMowerPath or straightLine:
+        controlPoints = x0.reshape((numControlPoints, 2))
+        knotPoints = create_unclamped_knot_points(0, tf, numControlPoints, 3)
+        return create_spline(knotPoints, controlPoints, splineOrder)
 
     # get size of constraints
     tempVelocityContstraints = get_spline_velocity(x0, 1, 3)
@@ -920,9 +924,6 @@ def optimize_spline_path(
     optProb.addObj("obj", scale=1.0)
 
     max_iter = 1000
-    if lawnMowerPath or straightLine:
-        max_iter = 0
-
     opt = OPT("ipopt")
     opt.options["print_level"] = 0
     opt.options["max_iter"] = max_iter
@@ -948,9 +949,6 @@ def optimize_spline_path(
     )
     controlPoints = sol.xStar["control_points"].reshape((numControlPoints, 2))
     return create_spline(knotPoints, controlPoints, splineOrder)
-    # controlPoints = x0.reshape((numControlPoints, 2))
-    # knotPoints = create_unclamped_knot_points(0, tf, numControlPoints, 3)
-    # return create_spline(knotPoints, controlPoints, splineOrder)
 
 
 def main():
