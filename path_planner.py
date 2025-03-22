@@ -575,27 +575,29 @@ def sample_path(path, interval):
 
     return np.array(sampled_points)
 
+
 def upsample_to_min_length(points, min_length=25):
     n = len(points)
     if n >= min_length:
         return points
 
     # Compute cumulative distances along the path
-    dists = np.sqrt(np.sum(np.diff(points, axis=0)**2, axis=1))
+    dists = np.sqrt(np.sum(np.diff(points, axis=0) ** 2, axis=1))
     cum_dists = np.insert(np.cumsum(dists), 0, 0)
-    
+
     # New target distances
     new_dists = np.linspace(0, cum_dists[-1], min_length)
 
     # Interpolate x and y separately
     x_interp = np.interp(new_dists, cum_dists, points[:, 0])
     y_interp = np.interp(new_dists, cum_dists, points[:, 1])
-    
+
     return np.column_stack((x_interp, y_interp))
+
 
 def fit_spline_to_path(path, num_control_points, splineOrder, startPoint, endPoint):
     if len(path) < 25:
-        path = upsample_to_min_length(path,30)
+        path = upsample_to_min_length(path, 30)
     tf = 1
     t = np.linspace(0, tf, len(path))
 
@@ -634,9 +636,9 @@ def create_initial_lawnmower_path(
         startingLocation, endingLocation, pathBudget, 2 * sensingRadius
     )
     if len(path) == 0:
-        path = np.vstack([startingLocation,endingLocation])
+        path = np.vstack([startingLocation, endingLocation])
     else:
-        path = np.vstack([startingLocation,path,endingLocation])
+        path = np.vstack([startingLocation, path, endingLocation])
     path = sample_path(path, 0.05)
     splineControlPoints, splineKnotPoints = fit_spline_to_path(
         path, numControlPoints, 3, startingLocation, endingLocation
