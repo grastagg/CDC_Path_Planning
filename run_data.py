@@ -111,7 +111,7 @@ def plot_combined_paths(
 
     c = ax.pcolormesh(X, Y, probs.reshape(numGrid, numGrid), vmin=0, vmax=1)
 
-    if True:
+    if False:
         os.makedirs("fig5Data/" + title, exist_ok=True)
         np.savetxt("fig5Data/" + title + "/probs.txt", probs.reshape(numGrid, numGrid))
         np.savetxt("fig5Data/" + title + "/X.txt", X)
@@ -412,7 +412,7 @@ def run_test(index, filename, noVirtual=False):
     optimizedFileName = "optimized.txt"
     straitLineFileName = "strait_line.txt"
 
-    saveData = False
+    saveData = True
     if saveData:
         saveFolder = "processedData/"
         if noVirtual:
@@ -589,20 +589,26 @@ if __name__ == "__main__":
     # start = time.time()
     # run_test(5, "original_5_virtual_3", noVirtual=True)
     # print("time to run test", time.time() - start)
-    start = time.time()
-    run_test(5, "original_5_virtual_3", noVirtual=False)
-    print("time to run test", time.time() - start)
-    plt.show()
-    #
-    #
-    #
-    #
     # start = time.time()
-    # run_all_different_numbers()
+    # run_test(5, "original_5_virtual_3", noVirtual=False)
     # print("time to run test", time.time() - start)
+    # plt.show()
+    #
+    # filename = "original_5_virtual_3"
+    # run_all(filename)
+    # filename = "original_5_virtual_1"
+    # run_all(filename)
+    # filename = "original_5_virtual_2"
+    # run_all(filename)
+    #
+    #
+    #
+    start = time.time()
+    run_all_different_numbers()
+    print("time to run test", time.time() - start)
 
-    # fig, axis = plt.subplots(1, 3, figsize=(20, 6))
-    # generate_plots("original_5", title="Five Known Hazards", ax=axis[0])
+    # fig, ax = plt.subplots()
+    # generate_plots("original_5", title="Five Known Hazards", ax=ax)
     # generate_plots("original_10", title="Ten Known Hazards", ax=axis[1])
     # generate_plots("original_15", title="Fifteen Known Hazards", ax=axis[2])
-    # plt.show()
+    plt.show()
