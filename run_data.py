@@ -246,6 +246,7 @@ def evaluate_path(splines, hidden_nodes, splineSampledt):
 
 
 def run_test(index, filename, noVirtual=False):
+    print("running test", index, filename, noVirtual)
     domain = (0, 1000, 0, 1000)
     # filename = "original_5_virtual_1"
     with open("data/" + filename + ".json") as f:
@@ -385,11 +386,11 @@ def run_test(index, filename, noVirtual=False):
     optimizedFileName = "optimized.txt"
     straitLineFileName = "strait_line.txt"
 
-    saveData = False
+    saveData = True
     if saveData:
         saveFolder = "processedData/"
         if noVirtual:
-            filename[-1] = "0"
+            filename = filename[:-1] + "0"
         if not os.path.exists(saveFolder + filename):
             os.mkdir(saveFolder + filename)
         with open(saveFolder + filename + "/" + lawnMowerFileName, "a") as f:
@@ -447,8 +448,10 @@ def run_test(index, filename, noVirtual=False):
 
 
 def run_all(filename):
-    for i in range(1):
+    for i in range(100):
         print("trial ", i)
+        if filename[-1] == "1":
+            run_test(i, filename, noVirtual=True)
         run_test(i, filename)
 
 
@@ -486,8 +489,10 @@ def compare_data(folder):
     print("mean strait line", np.mean(strait_line))
 
 
-def generate_plots(file):
-    file = "original_5"
+def generate_plots(file, title, ax):
+    virtual0opt = np.genfromtxt(f"processedData/{file}_virtual_0/optimized.txt")
+    virtual0lm = np.genfromtxt(f"processedData/{file}_virtual_0/lawnmower.txt")
+    virtual0strait = np.genfromtxt(f"processedData/{file}_virtual_0/strait_line.txt")
     virtual1opt = np.genfromtxt(f"processedData/{file}_virtual_1/optimized.txt")
     virtual1lm = np.genfromtxt(f"processedData/{file}_virtual_1/lawnmower.txt")
     virtual1strait = np.genfromtxt(f"processedData/{file}_virtual_1/strait_line.txt")
@@ -499,38 +504,79 @@ def generate_plots(file):
     virtual2lm = np.genfromtxt(f"processedData/{file}_virtual_2/lawnmower.txt")
     virtual2strait = np.genfromtxt(f"processedData/{file}_virtual_2/strait_line.txt")
 
-    fig, ax = plt.subplots()
-    ax.scatter(
-        range(3),
-        [np.mean(virtual1opt), np.mean(virtual2opt), np.mean(virtual3opt)],
+    optPlot = np.array(
+        [
+            np.mean(virtual0opt),
+            np.mean(virtual1opt),
+            np.mean(virtual2opt),
+            np.mean(virtual3opt),
+        ]
+    )
+    lmPlot = np.array(
+        [
+            np.mean(virtual0lm),
+            np.mean(virtual1lm),
+            np.mean(virtual2lm),
+            np.mean(virtual3lm),
+        ]
+    )
+    straitPlot = np.array(
+        [
+            np.mean(virtual0strait),
+            np.mean(virtual1strait),
+            np.mean(virtual2strait),
+            np.mean(virtual3strait),
+        ]
+    )
+
+    ax.plot(
+        range(4),
+        optPlot,
         label="Optimized",
+        marker="o",
     )
-    ax.scatter(
-        range(3),
-        [np.mean(virtual1lm), np.mean(virtual2lm), np.mean(virtual3lm)],
+    ax.plot(
+        range(4),
+        lmPlot,
         label="Lawn Mower",
+        marker="s",
     )
-    ax.scatter(
-        range(3),
-        [np.mean(virtual1strait), np.mean(virtual2strait), np.mean(virtual3strait)],
+    ax.plot(
+        range(4),
+        straitPlot,
         label="Strait Line",
+        marker="^",
     )
+    ax.set_title(title, fontsize=24)
+    # set y range
+    ax.set_ylim(0.2, 0.7)
+    # set x and y tick size to 20
+    ax.tick_params(axis="x", labelsize=20)
+    ax.tick_params(axis="y", labelsize=20)
+    # set x and y labels
+    ax.set_xlabel("Number of Virtual Nodes", fontsize=20)
+    ax.set_ylabel("Percent Found", fontsize=20)
+    plt.legend(fontsize=16)
 
 
 if __name__ == "__main__":
-    start = time.time()
-    run_test(5, "original_5_virtual_3", noVirtual=True)
-    print("time to run test", time.time() - start)
-    start = time.time()
-    run_test(5, "original_5_virtual_3", noVirtual=False)
-    print("time to run test", time.time() - start)
-    plt.show()
-    #
-    #
-    #
-    #
     # start = time.time()
-    # run_all_different_numbers()
+    # run_test(5, "original_5_virtual_3", noVirtual=True)
     # print("time to run test", time.time() - start)
+    # start = time.time()
+    # run_test(5, "original_5_virtual_3", noVirtual=False)
+    # print("time to run test", time.time() - start)
+    # plt.show()
+    #
+    #
+    #
+    #
+    start = time.time()
+    run_all_different_numbers()
+    print("time to run test", time.time() - start)
 
-    # generate_plots("original_5")
+    # fig, axis = plt.subplots(1, 3, figsize=(20, 6))
+    # generate_plots("original_5", title="Five Known Hazards", ax=axis[0])
+    # generate_plots("original_10", title="Ten Known Hazards", ax=axis[1])
+    # generate_plots("original_15", title="Fifteen Known Hazards", ax=axis[2])
+    # plt.show()
