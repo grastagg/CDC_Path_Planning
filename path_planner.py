@@ -20,7 +20,7 @@ np.random.seed(12341)
 
 jax.config.update("jax_enable_x64", True)
 # use cpu instead of gpu
-jax.config.update("jax_platform_name", "cpu")
+jax.config.update("jax_platform_name", "gpu")
 
 
 matplotlib.rcParams["pdf.fonttype"] = 42

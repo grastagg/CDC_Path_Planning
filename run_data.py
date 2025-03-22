@@ -43,7 +43,16 @@ def plot_known_and_hidden_nodes(
     [X, Y] = np.meshgrid(gridX, gridY)
 
     gird_locations = np.column_stack((X.ravel(), Y.ravel()))
+
     probs = path_planner.prior_hazard_prob_vec(gird_locations, original_nodes)
+
+    # if True:
+    #     # save data to file
+    #     np.savetxt("fig3Data/probs.txt", probs.reshape(numGrid, numGrid))
+    #     np.savetxt("fig3Data/X.txt", X)
+    #     np.savetxt("fig3Data/Y.txt", Y)
+    #     np.savetxt("fig3Data/hidden_nodes.txt", hidden_nodes)
+    #     np.savetxt("fig3Data/original_nodes.txt", original_nodes)
     c = ax.pcolormesh(X, Y, probs.reshape(numGrid, numGrid), vmin=0, vmax=1)
     cbar = fig.colorbar(c, ax=ax)
     # increase cbar font size
@@ -101,6 +110,23 @@ def plot_combined_paths(
     # Use make_axes_locatable to create a new axes for the colorbar
 
     c = ax.pcolormesh(X, Y, probs.reshape(numGrid, numGrid), vmin=0, vmax=1)
+
+    if True:
+        os.makedirs("fig5Data/" + title, exist_ok=True)
+        np.savetxt("fig5Data/" + title + "/probs.txt", probs.reshape(numGrid, numGrid))
+        np.savetxt("fig5Data/" + title + "/X.txt", X)
+        np.savetxt("fig5Data/" + title + "/Y.txt", Y)
+        np.savetxt(
+            "fig5Data/" + title + "/hidden_nodes_found.txt",
+            hidden_nodes[node_found == True],
+        )
+        np.savetxt(
+            "fig5Data/" + title + "/hidden_nodes_not_found.txt",
+            hidden_nodes[node_found == False],
+        )
+        np.savetxt("fig5Data/" + title + "/known_hazards.txt", known_hazards)
+        np.savetxt("fig5Data/" + title + "/psuedo_nodes.txt", psuedo_nodes)
+        np.savetxt("fig5Data/" + title + "/sampled_points.txt", sampledPoints)
 
     ax.scatter(sampledPoints[:, 0], sampledPoints[:, 1])
     ax.scatter(
@@ -386,7 +412,7 @@ def run_test(index, filename, noVirtual=False):
     optimizedFileName = "optimized.txt"
     straitLineFileName = "strait_line.txt"
 
-    saveData = True
+    saveData = False
     if saveData:
         saveFolder = "processedData/"
         if noVirtual:
@@ -563,17 +589,17 @@ if __name__ == "__main__":
     # start = time.time()
     # run_test(5, "original_5_virtual_3", noVirtual=True)
     # print("time to run test", time.time() - start)
-    # start = time.time()
-    # run_test(5, "original_5_virtual_3", noVirtual=False)
-    # print("time to run test", time.time() - start)
-    # plt.show()
-    #
-    #
-    #
-    #
     start = time.time()
-    run_all_different_numbers()
+    run_test(5, "original_5_virtual_3", noVirtual=False)
     print("time to run test", time.time() - start)
+    plt.show()
+    #
+    #
+    #
+    #
+    # start = time.time()
+    # run_all_different_numbers()
+    # print("time to run test", time.time() - start)
 
     # fig, axis = plt.subplots(1, 3, figsize=(20, 6))
     # generate_plots("original_5", title="Five Known Hazards", ax=axis[0])
