@@ -1,7 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from pyvrp import Model
-from pyvrp.stop import MaxRuntime
+
+# from pyvrp import Model
+# from pyvrp.stop import MaxRuntime
 from scipy.spatial import distance_matrix
 import jax
 import jax.numpy as jnp

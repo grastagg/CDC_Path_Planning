@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import time
 import os
 import concurrent.futures
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 
 import path_planner
@@ -33,7 +34,7 @@ def plot_known_and_hidden_nodes(
     original_nodes, hidden_nodes, generatorHiddeNodos, domain
 ):
     fig, ax = plt.subplots()
-    numGrid = 1000
+    numGrid = 100
     gridX = np.linspace(domain[0], domain[1], numGrid)
     gridY = np.linspace(domain[2], domain[3], numGrid)
     [X, Y] = np.meshgrid(gridX, gridY)
@@ -47,13 +48,9 @@ def plot_known_and_hidden_nodes(
     # set label of cbar
     cbar.set_label("Unkwown Hazard Probability", fontsize=20)
 
-    ax.scatter(hidden_nodes[:, 0], hidden_nodes[:, 1], c="red", label="hidden")
-    ax.scatter(original_nodes[:, 0], original_nodes[:, 1], c="blue", label="original")
+    ax.scatter(hidden_nodes[:, 0], hidden_nodes[:, 1], c="red", label="Unknown Hazard")
     ax.scatter(
-        generatorHiddeNodos[:, 0],
-        generatorHiddeNodos[:, 1],
-        c="green",
-        label="generator",
+        original_nodes[:, 0], original_nodes[:, 1], c="blue", label="Known Hazard"
     )
     ax.set_aspect("equal")
     ax.set_title("Prior Hazard Distribution", fontsize=30)
@@ -62,6 +59,7 @@ def plot_known_and_hidden_nodes(
     # set x and y tick font size
     ax.tick_params(axis="x", labelsize=20)
     ax.tick_params(axis="y", labelsize=20)
+    plt.legend(fontsize=14)
     # plt.show()
 
 
@@ -73,25 +71,149 @@ def plot_route(edges):
 
 
 def plot_combined_paths(
-    splines, original_nodes, splineSampledt, hidden_nodes, node_found, domain
+    splines,
+    original_nodes,
+    splineSampledt,
+    hidden_nodes,
+    node_found,
+    domain,
+    known_hazards,
+    psuedo_nodes,
+    title,
+    ax,
+    fig,
+    plotColorbar=False,
 ):
-    fig, ax = plt.subplots()
-    # plot_hazard_prob(knownHazards, gridPoints, fig, ax)
     sampledPoints = sample_splines(splines, splineSampledt)
 
-    x = np.linspace(domain[0], domain[1], 1000)
-    y = np.linspace(domain[2], domain[3], 1000)
+    numGrid = 100
+    x = np.linspace(domain[0], domain[1], numGrid)
+    y = np.linspace(domain[2], domain[3], numGrid)
     [X, Y] = np.meshgrid(x, y)
     grid_locations = np.column_stack((X.ravel(), Y.ravel()))
     probs = path_planner.batch_hazard_probs(
         grid_locations, sampledPoints, original_nodes
     )
-    ax.pcolormesh(X, Y, probs.reshape(1000, 1000))
+
+    # Use make_axes_locatable to create a new axes for the colorbar
+
+    c = ax.pcolormesh(X, Y, probs.reshape(numGrid, numGrid), vmin=0, vmax=1)
+
     ax.scatter(sampledPoints[:, 0], sampledPoints[:, 1])
-    ax.scatter(hidden_nodes[:, 0], hidden_nodes[:, 1], c=node_found, cmap="cool")
+    ax.scatter(
+        hidden_nodes[node_found == True, 0],
+        hidden_nodes[node_found == True, 1],
+        c="green",
+        label="Found",
+    )
+    ax.scatter(
+        hidden_nodes[node_found == False, 0],
+        hidden_nodes[node_found == False, 1],
+        c="yellow",
+        label="Not Found",
+    )
+    ax.scatter(
+        known_hazards[:, 0],
+        known_hazards[:, 1],
+        s=100,
+        c="blue",
+        label="Known Hazards",
+    )
+    ax.scatter(
+        psuedo_nodes[:, 0],
+        psuedo_nodes[:, 1],
+        s=100,
+        marker="s",
+        c="r",
+        label="Psuedo Node",
+    )
+
     ax.set_aspect("equal")
+    ax.tick_params(axis="x", labelsize=20)
+    ax.tick_params(axis="y", labelsize=20)
+    ax.set_xlabel("X", fontsize=20)
+    ax.set_ylabel("Y", fontsize=20)
+    ax.set_title(title, fontsize=26)
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="5%", pad=0.05)  # size and padding
+    cbar = fig.colorbar(c, cax=cax)  # attach colorbar to the new axis
+    cbar.ax.tick_params(labelsize=20)
+    if plotColorbar:
+        cbar.set_label("Unknown Hazard Probability", fontsize=20)
+        ax.legend(
+            fontsize=12
+        )  # make sure to use ax.legend if you're plotting in a specific ax
 
 
+#
+# def plot_combined_paths(
+#     splines,
+#     original_nodes,
+#     splineSampledt,
+#     hidden_nodes,
+#     node_found,
+#     domain,
+#     known_hazards,
+#     psuedo_nodes,
+#     title,
+#     ax,
+#     fig,
+# ):
+#     # plot_hazard_prob(knownHazards, gridPoints, fig, ax)
+#     sampledPoints = sample_splines(splines, splineSampledt)
+#
+#     numGrid = 100
+#     x = np.linspace(domain[0], domain[1], numGrid)
+#     y = np.linspace(domain[2], domain[3], numGrid)
+#     [X, Y] = np.meshgrid(x, y)
+#     grid_locations = np.column_stack((X.ravel(), Y.ravel()))
+#     probs = path_planner.batch_hazard_probs(
+#         grid_locations, sampledPoints, original_nodes
+#     )
+#     c = ax.pcolormesh(X, Y, probs.reshape(numGrid, numGrid), vmin=0, vmax=1)
+#     cbar = fig.colorbar(c, ax=ax)
+#     # increase cbar font size
+#     cbar.ax.tick_params(labelsize=20)
+#     # set label of cbar
+#     cbar.set_label("Unkwown Hazard Probability", fontsize=20)
+#     ax.scatter(sampledPoints[:, 0], sampledPoints[:, 1], label="Measurements")
+#     ax.scatter(
+#         hidden_nodes[node_found == True, 0],
+#         hidden_nodes[node_found == True, 1],
+#         c="green",
+#         label="Found",
+#     )
+#     ax.scatter(
+#         hidden_nodes[node_found == False, 0],
+#         hidden_nodes[node_found == False, 1],
+#         c="yellow",
+#         label="Not Found",
+#     )
+#     ax.scatter(
+#         known_hazards[:, 0],
+#         known_hazards[:, 1],
+#         s=100,
+#         c="blue",
+#         label="Known Hazards",
+#     )
+#     ax.scatter(
+#         psuedo_nodes[:, 0],
+#         psuedo_nodes[:, 1],
+#         s=100,
+#         marker="s",
+#         c="r",
+#         label="Psuedo Node",
+#     )
+#
+#     ax.set_aspect("equal")
+#     ax.tick_params(axis="x", labelsize=20)
+#     ax.tick_params(axis="y", labelsize=20)
+#     ax.set_xlabel("X", fontsize=20)
+#     ax.set_ylabel("Y", fontsize=20)
+#     ax.set_title(title, fontsize=26)
+#     plt.legend(fontsize=16)
+#
+#
 def sample_splines(splines, splineSampledt):
     sampledPoints = []
     for i, spline in enumerate(splines):
@@ -132,15 +254,11 @@ def run_test(index, filename):
 
         hidden_nodes = sample_hidden_nodes(
             np.vstack([original_nodes, generatingHiddenNodes]),
-            num_hidden_nodes=50,
+            num_hidden_nodes=100,
             domain=domain,
         )
         virtual_nodes = np.array(data["edge_virtual_nodes"])
         combinded_nodes = np.vstack([original_nodes, virtual_nodes])
-
-        # plot_known_and_hidden_nodes(
-        #     original_nodes, hidden_nodes, generatingHiddenNodes, domain
-        # )
 
         route = data["routes_cvt"]
         edges = []
@@ -259,7 +377,7 @@ def run_test(index, filename):
     optimizedFileName = "optimized.txt"
     straitLineFileName = "strait_line.txt"
 
-    saveData = False
+    saveData = True
     if saveData:
         saveFolder = "processedData/"
         if not os.path.exists(saveFolder + filename):
@@ -271,8 +389,22 @@ def run_test(index, filename):
         with open(saveFolder + filename + "/" + straitLineFileName, "a") as f:
             f.write(f"{percent_found_strait}\n")
     else:
+        plot_known_and_hidden_nodes(
+            original_nodes, hidden_nodes, generatingHiddenNodes, domain
+        )
+        fig, axis = plt.subplots(1, 3, figsize=(18, 6))
         plot_combined_paths(
-            splines, original_nodes, splineSampledt, hidden_nodes, node_found, domain
+            splines,
+            original_nodes,
+            splineSampledt,
+            hidden_nodes,
+            node_found,
+            domain,
+            original_nodes,
+            virtual_nodes,
+            title="Optimized Paths",
+            ax=axis[0],
+            fig=fig,
         )
         plot_combined_paths(
             lawnMowerSPlines,
@@ -281,6 +413,11 @@ def run_test(index, filename):
             hidden_nodes,
             node_found_lm,
             domain,
+            original_nodes,
+            virtual_nodes,
+            title="Lawnmower Paths",
+            ax=axis[1],
+            fig=fig,
         )
         plot_combined_paths(
             straitSplines,
@@ -289,12 +426,19 @@ def run_test(index, filename):
             hidden_nodes,
             node_found_strait,
             domain,
+            original_nodes,
+            virtual_nodes,
+            title="Strait Paths",
+            ax=axis[2],
+            fig=fig,
+            plotColorbar=True,
         )
+        plt.tight_layout()
         plt.show()
 
 
 def run_all(filename):
-    for i in range(100):
+    for i in range(10):
         print("trial ", i)
         run_test(i, filename)
 
@@ -367,13 +511,14 @@ def generate_plots(file):
 
 
 if __name__ == "__main__":
-    start = time.time()
-    run_test(11, "original_5_virtual_1")
-    print("time to run test", time.time() - start)
+    # start = time.time()
+    # run_test(5, "original_5_virtual_2")
+    # print("time to run test", time.time() - start)
     #
     # folder = "processedData/original_5_virtual_3/"
     # compare_data(folder)
+    # folder = "original_5_virtual_1"
     # run_all(folder)
-    # run_all_different_numbers()
+    run_all_different_numbers()
 
     # generate_plots("original_10")

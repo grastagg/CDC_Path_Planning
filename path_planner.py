@@ -20,7 +20,7 @@ np.random.seed(12341)
 
 jax.config.update("jax_enable_x64", True)
 # use cpu instead of gpu
-jax.config.update("jax_platform_name", "gpu")
+jax.config.update("jax_platform_name", "cpu")
 
 
 matplotlib.rcParams["pdf.fonttype"] = 42
@@ -36,7 +36,7 @@ from bspline.matrix_evaluation import (
 numSamplesPerInterval = 2
 # numSamplesPerIntervalObj = 30
 
-steepness = 0.1
+steepness = 0.002
 
 
 # def plot_spline(spline, pursuerPosition, pursuerRange, pursuerCaptureRange,pez_limit,useProbabalistic):
@@ -126,12 +126,12 @@ def prior_hazard_distirbution(x, hazardLocations):
     # If there is prior knowledge of where hazards are located include it as a probability distribution here
     baseProir = 0.1
     maxProir = 1.0
-    decayRate = 0.015
+    decayRate = 0.00015
     # decayRate = 0.012
     # dists = jnp.linalg.norm(hazardLocations - x, axis=1)
     dists = safe_norm_vectorized(x, hazardLocations)
 
-    singleHazardProbs = jnp.exp(-decayRate * dists)
+    singleHazardProbs = jnp.exp(-decayRate * dists**2)
     combinedHazardProbs = 1 - (jnp.prod(1 - singleHazardProbs) * (1 - baseProir))
 
     # scale appropriately
@@ -148,7 +148,7 @@ prior_hazard_prob_vec = jax.jit(jax.vmap(prior_hazard_distirbution, in_axes=(0, 
 @jax.jit
 def hazard_at_x_given_searched_at_points(x, points, steepness):
     dists = safe_norm_vectorized(x, points)
-    return jnp.exp(-steepness * dists)
+    return jnp.exp(-steepness * dists**2)
 
 
 @jax.jit
@@ -676,7 +676,7 @@ def create_initial_spline(
         x0 = np.linspace(startingLocation, endingLocation, numControlPoints).flatten()
 
     elif lawnMowerPath:
-        sensingRadius = -np.log(0.1) / steepness
+        sensingRadius = np.sqrt(-np.log(0.1) / steepness)
         x0 = create_initial_lawnmower_path(
             startingLocation,
             endingLocation,
@@ -685,7 +685,7 @@ def create_initial_spline(
             sensingRadius,
         ).flatten()
     else:
-        sensingRadius = -np.log(0.1) / steepness
+        sensingRadius = np.sqrt(-np.log(0.1) / steepness)
         x0 = create_initial_lawnmower_path(
             startingLocation,
             endingLocation,
@@ -869,6 +869,10 @@ def optimize_spline_path(
         straightLine,
         lawnMowerPath,
     )
+    if lawnMowerPath or straightLine:
+        controlPoints = x0.reshape((numControlPoints, 2))
+        knotPoints = create_unclamped_knot_points(0, tf, numControlPoints, 3)
+        return create_spline(knotPoints, controlPoints, splineOrder)
 
     # get size of constraints
     tempVelocityContstraints = get_spline_velocity(x0, 1, 3)
@@ -920,9 +924,6 @@ def optimize_spline_path(
     optProb.addObj("obj", scale=1.0)
 
     max_iter = 1000
-    if lawnMowerPath or straightLine:
-        max_iter = 0
-
     opt = OPT("ipopt")
     opt.options["print_level"] = 0
     opt.options["max_iter"] = max_iter
@@ -948,9 +949,6 @@ def optimize_spline_path(
     )
     controlPoints = sol.xStar["control_points"].reshape((numControlPoints, 2))
     return create_spline(knotPoints, controlPoints, splineOrder)
-    # controlPoints = x0.reshape((numControlPoints, 2))
-    # knotPoints = create_unclamped_knot_points(0, tf, numControlPoints, 3)
-    # return create_spline(knotPoints, controlPoints, splineOrder)
 
 
 def main():
