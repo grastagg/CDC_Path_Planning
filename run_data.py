@@ -6,7 +6,10 @@ import time
 import os
 import concurrent.futures
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+import matplotlib
 
+matplotlib.rcParams["pdf.fonttype"] = 42
+matplotlib.rcParams["ps.fonttype"] = 42
 
 import path_planner
 import routing_strategy
@@ -16,7 +19,7 @@ def sample_hidden_nodes(original_nodes, num_hidden_nodes, domain, seed=2):
     np.random.seed(seed)
     hidden_nodes = []
     num_nodes = 0
-    numGrid = 1000
+    numGrid = 10000
     gridX = np.linspace(domain[0], domain[1], numGrid)
     gridY = np.linspace(domain[2], domain[3], numGrid)
     [X, Y] = np.meshgrid(gridX, gridY)
@@ -242,7 +245,7 @@ def evaluate_path(splines, hidden_nodes, splineSampledt):
     return np.sum(node_found) / len(hidden_nodes), node_found
 
 
-def run_test(index, filename):
+def run_test(index, filename, noVirtual=False):
     domain = (0, 1000, 0, 1000)
     # filename = "original_5_virtual_1"
     with open("data/" + filename + ".json") as f:
@@ -254,15 +257,20 @@ def run_test(index, filename):
 
         hidden_nodes = sample_hidden_nodes(
             np.vstack([original_nodes, generatingHiddenNodes]),
-            num_hidden_nodes=100,
+            num_hidden_nodes=50,
             domain=domain,
         )
         virtual_nodes = np.array(data["edge_virtual_nodes"])
-        combinded_nodes = np.vstack([original_nodes, virtual_nodes])
+        if noVirtual:
+            combinded_nodes = original_nodes
+            route = data["routes_original"]
+            budgets = data["fingal_budget_original"]
+        else:
+            combinded_nodes = np.vstack([original_nodes, virtual_nodes])
+            route = data["routes_cvt"]
+            budgets = data["final_budget"]
 
-        route = data["routes_cvt"]
         edges = []
-        budgets = data["final_budget"]
         for i in range(len(route) - 1):
             if route[i] == 0:
                 start = [0.0, 0.0]
@@ -377,9 +385,11 @@ def run_test(index, filename):
     optimizedFileName = "optimized.txt"
     straitLineFileName = "strait_line.txt"
 
-    saveData = True
+    saveData = False
     if saveData:
         saveFolder = "processedData/"
+        if noVirtual:
+            filename[-1] = "0"
         if not os.path.exists(saveFolder + filename):
             os.mkdir(saveFolder + filename)
         with open(saveFolder + filename + "/" + lawnMowerFileName, "a") as f:
@@ -434,11 +444,10 @@ def run_test(index, filename):
             plotColorbar=True,
         )
         plt.tight_layout()
-        plt.show()
 
 
 def run_all(filename):
-    for i in range(10):
+    for i in range(1):
         print("trial ", i)
         run_test(i, filename)
 
@@ -460,11 +469,11 @@ def run_all_different_numbers():
         if file.endswith(".json")
     ]
 
-    for file in json_files:
-        print("running file", file)
-        run_all(file)
-    # with concurrent.futures.ProcessPoolExecutor(max_workers=5) as executor:
-    #     executor.map(run_all, json_files)
+    # for file in json_files:
+    #     print("running file", file)
+    #     run_all(file)
+    with concurrent.futures.ProcessPoolExecutor() as executor:
+        executor.map(run_all, json_files)
 
 
 def compare_data(folder):
@@ -507,18 +516,21 @@ def generate_plots(file):
         label="Strait Line",
     )
 
-    plt.show()
-
 
 if __name__ == "__main__":
-    # start = time.time()
-    # run_test(5, "original_5_virtual_2")
-    # print("time to run test", time.time() - start)
+    start = time.time()
+    run_test(5, "original_5_virtual_3", noVirtual=True)
+    print("time to run test", time.time() - start)
+    start = time.time()
+    run_test(5, "original_5_virtual_3", noVirtual=False)
+    print("time to run test", time.time() - start)
+    plt.show()
     #
-    # folder = "processedData/original_5_virtual_3/"
-    # compare_data(folder)
-    # folder = "original_5_virtual_1"
-    # run_all(folder)
-    run_all_different_numbers()
+    #
+    #
+    #
+    # start = time.time()
+    # run_all_different_numbers()
+    # print("time to run test", time.time() - start)
 
-    # generate_plots("original_10")
+    # generate_plots("original_5")
