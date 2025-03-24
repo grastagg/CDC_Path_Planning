@@ -603,12 +603,12 @@ if __name__ == "__main__":
     #
     #
     #
-    start = time.time()
-    run_all_different_numbers()
-    print("time to run test", time.time() - start)
+    # start = time.time()
+    # run_all_different_numbers()
+    # print("time to run test", time.time() - start)
 
-    # fig, ax = plt.subplots()
-    # generate_plots("original_5", title="Five Known Hazards", ax=ax)
-    # generate_plots("original_10", title="Ten Known Hazards", ax=axis[1])
-    # generate_plots("original_15", title="Fifteen Known Hazards", ax=axis[2])
+    fig, axis = plt.subplots(1, 3)
+    generate_plots("original_5", title="Five Known Hazards", ax=axis[0])
+    generate_plots("original_10", title="Ten Known Hazards", ax=axis[1])
+    generate_plots("original_15", title="Fifteen Known Hazards", ax=axis[2])
     plt.show()
