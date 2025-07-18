@@ -124,8 +124,7 @@ safe_norm_vectorized = jax.jit(jax.vmap(safe_norm, in_axes=(None, 0)))
 @jax.jit
 def prior_hazard_distirbution(x, hazardLocations):
     # If there is prior knowledge of where hazards are located include it as a probability distribution here
-    baseProir = 0.5
-    maxProir = 1.0
+    baseProir = 0.0
     decayRate = 0.00015
     # decayRate = 0.012
     # dists = jnp.linalg.norm(hazardLocations - x, axis=1)

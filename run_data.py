@@ -279,7 +279,9 @@ def run_test(index, filename, noVirtual=False):
         data = json.load(f)[index]
         original_nodes = np.array(data["original_nodes"])
         print("original nodes", original_nodes)
-        numGeneratingHidden = 0
+        numGeneratingHidden = 4
+        seed = 5564
+        np.random.seed(seed)
         generatingHiddenNodes = np.random.uniform(0, 1000, (numGeneratingHidden, 2))
 
         hidden_nodes = sample_hidden_nodes(
@@ -474,7 +476,7 @@ def run_test(index, filename, noVirtual=False):
 
 
 def run_all(filename):
-    for i in range(100):
+    for i in range(5):
         print("trial ", i)
         if filename[-1] == "1":
             run_test(i, filename, noVirtual=True)
